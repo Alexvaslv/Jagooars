@@ -38,6 +38,9 @@ export default function App() {
   
   // Navigation
   const [activeTab, setActiveTab] = useState<TabType>('feed');
+  const [feedTab, setFeedTab] = useState<'friends' | 'global'>('friends');
+  const [friendsTab, setFriendsTab] = useState<'all' | 'online' | 'requests'>('all');
+  const [activeCommunityId, setActiveCommunityId] = useState<string | null>(null);
   const [isNavOpen, setIsNavOpen] = useState(false);
 
   // Global Data
@@ -383,6 +386,12 @@ export default function App() {
     } catch (e) { handleFirestoreError(e, OperationType.UPDATE, `users/${userId}`); }
   };
 
+  const handleSetUserVip = async (userId: string, vipStatus: string) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), { vipStatus });
+    } catch (e) { handleFirestoreError(e, OperationType.UPDATE, `users/${userId}`); }
+  };
+
   const handleToggleCommunityStatus = async (commId: string, field: 'isAdmin' | 'isVerified' | 'isMuted' | 'isBanned' | 'isFrozen', currentValue: boolean) => {
     try {
       await updateDoc(doc(db, 'communities', commId), { [field]: !currentValue });
@@ -408,6 +417,13 @@ export default function App() {
     return <span className="text-slate-400 text-xs flex items-center gap-1"><Clock size={12}/>Был(а) {formatTimeAgo(u.lastSeen)}</span>;
   };
 
+  const renderVipBadge = (vipStatus: string) => {
+    if (vipStatus === 'gold') return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-yellow-900/40 text-yellow-400 border border-yellow-500/30 ml-1">VIP GOLD</span>;
+    if (vipStatus === 'silver') return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-300/20 text-slate-300 border border-slate-400/30 ml-1">VIP SILVER</span>;
+    if (vipStatus === 'bronze') return <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-900/40 text-amber-500 border border-amber-600/30 ml-1">VIP BRONZE</span>;
+    return null;
+  };
+
   // --- UI Components ---
   if (!isAuthReady) {
     return (
@@ -415,7 +431,7 @@ export default function App() {
         <div className="bg-gradient-fixed"></div>
         <div className="animate-pulse flex flex-col items-center">
           <div className="w-12 h-12 border-4 border-indigo-500/40 border-t-indigo-600 rounded-full animate-spin mb-4 shadow-lg"></div>
-          <p className="text-slate-600 font-semibold">Загрузка...</p>
+          <p className="text-slate-300 font-semibold">Загрузка...</p>
         </div>
       </div>
     );
@@ -426,13 +442,13 @@ export default function App() {
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="bg-gradient-fixed"></div>
         <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="glass-panel p-8 rounded-3xl max-w-md w-full text-center">
-          <div className="w-20 h-20 bg-indigo-50 border border-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
+          <div className="w-20 h-20 bg-[#2A2B36] border border-indigo-100 text-indigo-400 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
             <Settings size={40} />
           </div>
-          <h1 className="text-3xl font-extrabold text-slate-800 mb-2">Jagooars</h1>
-          <p className="text-slate-500 mb-6 font-medium">Войдите, чтобы присоединиться к сообществу.</p>
+          <h1 className="text-3xl font-extrabold text-white mb-2">Jagooars</h1>
+          <p className="text-slate-400 mb-6 font-medium">Войдите, чтобы присоединиться к сообществу.</p>
           {loginError && (
-            <div className="mb-6 p-4 bg-red-50 text-red-600 text-sm rounded-xl border border-red-100 text-left">
+            <div className="mb-6 p-4 bg-red-900/30 text-red-600 text-sm rounded-xl border border-red-100 text-left">
               <p className="font-bold mb-1">Ошибка входа:</p><p>{loginError}</p>
             </div>
           )}
@@ -449,11 +465,11 @@ export default function App() {
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="bg-gradient-fixed"></div>
         <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="glass-panel p-8 rounded-3xl max-w-md w-full text-center">
-          <div className="w-20 h-20 bg-red-50 border border-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
+          <div className="w-20 h-20 bg-red-900/30 border border-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
             <Shield size={40} />
           </div>
-          <h1 className="text-3xl font-extrabold text-slate-800 mb-2">Аккаунт заблокирован</h1>
-          <p className="text-slate-500 mb-6 font-medium">Ваш аккаунт был заблокирован администрацией за нарушение правил сообщества.</p>
+          <h1 className="text-3xl font-extrabold text-white mb-2">Аккаунт заблокирован</h1>
+          <p className="text-slate-400 mb-6 font-medium">Ваш аккаунт был заблокирован администрацией за нарушение правил сообщества.</p>
           <button onClick={handleLogout} className="glass-button w-full py-3.5 font-bold rounded-xl flex items-center justify-center gap-2 text-lg">
             Выйти
           </button>
@@ -471,7 +487,7 @@ export default function App() {
   ];
 
   return (
-    <div className="min-h-screen text-slate-800 font-sans flex justify-center selection:bg-indigo-500/20">
+    <div className="min-h-screen text-white font-sans flex justify-center selection:bg-[#2A2B36]0/20">
       <div className="bg-gradient-fixed"></div>
       
       {/* Animated Floating Navigation Toggle (Mobile) */}
@@ -492,11 +508,11 @@ export default function App() {
         {isNavOpen && (
           <motion.div 
             initial={{ opacity: 0, y: 50, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 50, scale: 0.9 }}
-            className="md:hidden fixed bottom-24 right-6 glass-panel p-3 rounded-3xl flex flex-col gap-2 z-[50] shadow-2xl border border-white"
+            className="md:hidden fixed bottom-24 right-6 glass-panel p-3 rounded-3xl flex flex-col gap-2 z-[50] shadow-2xl border border-[#1A1B22]"
           >
             {navItems.map(item => (
               <button key={item.id} onClick={() => { setActiveTab(item.id as TabType); setIsNavOpen(false); }}
-                className={`flex items-center gap-3 px-4 py-3 rounded-2xl font-bold transition-all ${activeTab === item.id ? 'bg-indigo-50 text-indigo-600 shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+                className={`flex items-center gap-3 px-4 py-3 rounded-2xl font-bold transition-all ${activeTab === item.id ? 'bg-[#2A2B36] text-indigo-400 shadow-sm' : 'text-slate-300 hover:bg-[#1A1B22]'}`}
               >
                 <item.icon size={20} className={activeTab === item.id ? 'stroke-[2.5px]' : ''} />
                 <span>{item.label}</span>
@@ -507,23 +523,23 @@ export default function App() {
       </AnimatePresence>
 
       {/* Sidebar Navigation (Desktop) */}
-      <nav className="hidden md:flex flex-col w-72 fixed left-0 h-screen glass-sidebar p-6 z-40 border-r border-slate-200/50">
+      <nav className="hidden md:flex flex-col w-72 fixed left-0 h-screen glass-sidebar p-6 z-40 border-r border-[#3A3B4C]/50">
         <div className="flex items-center gap-4 mb-10">
           <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-500 shadow-lg shadow-indigo-500/30 rounded-2xl flex items-center justify-center text-white font-extrabold text-2xl">J</div>
-          <span className="text-3xl font-extrabold tracking-tight text-slate-800">Jagooars</span>
+          <span className="text-3xl font-extrabold tracking-tight text-white">Jagooars</span>
         </div>
         <div className="flex flex-col gap-3">
           {navItems.map((item) => (
             <button key={item.id} onClick={() => setActiveTab(item.id as TabType)}
-              className={`flex items-center gap-4 px-5 py-4 rounded-2xl font-bold transition-all ${activeTab === item.id ? 'bg-white shadow-md text-indigo-600 border border-slate-100' : 'text-slate-500 hover:bg-white/50 hover:text-slate-800'}`}
+              className={`flex items-center gap-4 px-5 py-4 rounded-2xl font-bold transition-all ${activeTab === item.id ? 'bg-[#22232E] shadow-md text-indigo-400 border border-[#2A2B36]' : 'text-slate-400 hover:bg-[#22232E]/50 hover:text-white'}`}
             >
               <item.icon size={24} className={activeTab === item.id ? 'stroke-[2.5px]' : ''} />
               <span className="text-lg">{item.label}</span>
             </button>
           ))}
         </div>
-        <div className="mt-auto pt-6 border-t border-slate-200/50">
-          <button onClick={handleLogout} className="flex items-center gap-4 px-5 py-4 w-full text-slate-500 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-colors font-bold">
+        <div className="mt-auto pt-6 border-t border-[#3A3B4C]/50">
+          <button onClick={handleLogout} className="flex items-center gap-4 px-5 py-4 w-full text-slate-400 hover:text-red-500 hover:bg-red-900/30 rounded-2xl transition-colors font-bold">
             <LogOut size={24} />
             <span className="text-lg">Выйти</span>
           </button>
@@ -538,18 +554,24 @@ export default function App() {
             {/* FEED TAB */}
             {activeTab === 'feed' && (
               <div>
-                <h1 className="text-3xl font-extrabold text-slate-800 mb-6 px-2">Лента новостей</h1>
+                <div className="flex justify-between items-center mb-6 px-2">
+                  <h1 className="text-3xl font-extrabold text-white">Лента новостей</h1>
+                  <div className="flex bg-[#2A2B36] rounded-xl p-1">
+                    <button onClick={() => setFeedTab('friends')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${feedTab === 'friends' ? 'bg-[#454656] text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>Друзья</button>
+                    <button onClick={() => setFeedTab('global')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${feedTab === 'global' ? 'bg-[#454656] text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>Глобальная</button>
+                  </div>
+                </div>
                 
                 {/* Create Post */}
                 <div className="glass-panel rounded-3xl p-5 mb-8 shadow-sm">
                   <div className="flex gap-4">
-                    <img src={currentUserData.profileImage} alt="Avatar" className="w-12 h-12 rounded-full object-cover border-2 border-white shadow-sm" />
+                    <img src={currentUserData.profileImage} alt="Avatar" className="w-12 h-12 rounded-full object-cover border-2 border-[#1A1B22] shadow-sm" />
                     <div className="flex-1">
                       <textarea value={newPostText} onChange={(e) => setNewPostText(e.target.value)} placeholder="Что у вас нового?" className="glass-input rounded-2xl px-5 py-4 w-full resize-none min-h-[100px] text-base font-medium" />
                       {newPostImage && (
-                        <div className="relative mb-4 mt-4 rounded-2xl overflow-hidden border border-slate-200 inline-block shadow-sm">
+                        <div className="relative mb-4 mt-4 rounded-2xl overflow-hidden border border-[#3A3B4C] inline-block shadow-sm">
                           <img src={newPostImage} alt="Preview" className="max-h-64 object-contain" />
-                          <button onClick={() => setNewPostImage('')} className="absolute top-2 right-2 p-2 bg-white/80 hover:bg-red-500 hover:text-white rounded-full transition-colors backdrop-blur-md shadow-sm"><X size={16} /></button>
+                          <button onClick={() => setNewPostImage('')} className="absolute top-2 right-2 p-2 bg-[#22232E]/80 hover:bg-red-900/300 hover:text-white rounded-full transition-colors backdrop-blur-md shadow-sm"><X size={16} /></button>
                         </div>
                       )}
                       <div className="flex justify-between items-center pt-4 mt-2">
@@ -566,40 +588,68 @@ export default function App() {
 
                 {/* Posts List */}
                 <div className="space-y-6">
-                  {posts.length === 0 ? (
-                    <div className="text-center py-16 text-slate-400 font-semibold glass-panel rounded-3xl">Здесь пока нет постов. Напишите что-нибудь!</div>
+                  {posts.filter(post => {
+                    if (feedTab === 'friends') {
+                      const myFriendIds = friends.filter(f => f.status === 'accepted').map(f => f.user1 === user.uid ? f.user2 : f.user1);
+                      return !post.communityId && (post.userId === user.uid || myFriendIds.includes(post.userId));
+                    } else {
+                      if (post.communityId) {
+                        const comm = communities.find(c => c.id === post.communityId);
+                        return comm?.isVerified;
+                      } else {
+                        const author = allUsers.find(u => u.id === post.userId) || post;
+                        return author.isVerified;
+                      }
+                    }
+                  }).length === 0 ? (
+                    <div className="text-center py-16 text-slate-400 font-semibold glass-panel rounded-3xl">Здесь пока нет постов.</div>
                   ) : (
-                    posts.map(post => {
+                    posts.filter(post => {
+                      if (feedTab === 'friends') {
+                        const myFriendIds = friends.filter(f => f.status === 'accepted').map(f => f.user1 === user.uid ? f.user2 : f.user1);
+                        return !post.communityId && (post.userId === user.uid || myFriendIds.includes(post.userId));
+                      } else {
+                        if (post.communityId) {
+                          const comm = communities.find(c => c.id === post.communityId);
+                          return comm?.isVerified;
+                        } else {
+                          const author = allUsers.find(u => u.id === post.userId) || post;
+                          return author.isVerified;
+                        }
+                      }
+                    }).map(post => {
                       const author = allUsers.find(u => u.id === post.userId) || post;
+                      const community = post.communityId ? communities.find(c => c.id === post.communityId) : null;
                       return (
                         <motion.div key={post.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-panel rounded-3xl p-6 shadow-sm">
                           <div className="flex justify-between items-start mb-5">
                             <div className="flex gap-4 items-center">
-                              <img src={author.profileImage || post.authorImage} alt="Author" className="w-12 h-12 rounded-full object-cover border-2 border-white shadow-sm" />
+                              <img src={community ? community.coverImage || author.profileImage : author.profileImage || post.authorImage} alt="Author" className="w-12 h-12 rounded-full object-cover border-2 border-[#1A1B22] shadow-sm" />
                               <div>
-                                <div className="font-extrabold text-slate-800 flex items-center gap-1.5 text-lg">
-                                  {author.name || post.authorName}
-                                  {author.isVerified && <BadgeCheck size={18} className="text-indigo-500" />}
-                                  {author.isAdmin && <Shield size={16} className="text-purple-500" />}
+                                <div className="font-extrabold text-white flex items-center gap-1.5 text-lg">
+                                  {community ? community.name : author.name || post.authorName}
+                                  {(community ? community.isVerified : author.isVerified) && <BadgeCheck size={18} className="text-indigo-400" />}
+                                  {(community ? community.isAdmin : author.isAdmin) && <Shield size={16} className="text-purple-500" />}
+                                  {!community && renderVipBadge(author.vipStatus)}
                                 </div>
-                                <div className="text-sm text-slate-500 font-medium flex items-center gap-2">
-                                  @{author.username || post.authorUsername} • {formatTimeAgo(post.createdAt)}
+                                <div className="text-sm text-slate-400 font-medium flex items-center gap-2">
+                                  @{community ? community.username : author.username || post.authorUsername} • {formatTimeAgo(post.createdAt)}
                                 </div>
                               </div>
                             </div>
                             {user.uid === post.userId && (
-                              <button onClick={(e) => handleDeletePost(post.id, e)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"><Trash2 size={20} /></button>
+                              <button onClick={(e) => handleDeletePost(post.id, e)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-900/30 rounded-full transition-colors"><Trash2 size={20} /></button>
                             )}
                           </div>
-                          {post.text && <p className="text-slate-700 font-medium mb-5 whitespace-pre-wrap text-[16px] leading-relaxed break-words">{post.text}</p>}
-                          {post.image && <div className="rounded-2xl overflow-hidden border border-slate-100 mb-5 shadow-sm"><img src={post.image} alt="Post content" className="w-full h-auto max-h-[500px] object-cover" /></div>}
-                          <div className="flex gap-8 pt-4 border-t border-slate-100">
-                            <button onClick={(e) => handleLikePost(post.id, e)} className="flex items-center gap-2 text-slate-500 hover:text-pink-500 transition-colors group font-bold">
+                          {post.text && <p className="text-slate-200 font-medium mb-5 whitespace-pre-wrap text-[16px] leading-relaxed break-words">{post.text}</p>}
+                          {post.image && <div className="rounded-2xl overflow-hidden border border-[#2A2B36] mb-5 shadow-sm"><img src={post.image} alt="Post content" className="w-full h-auto max-h-[500px] object-cover" /></div>}
+                          <div className="flex gap-8 pt-4 border-t border-[#2A2B36]">
+                            <button onClick={(e) => handleLikePost(post.id, e)} className="flex items-center gap-2 text-slate-400 hover:text-pink-500 transition-colors group font-bold">
                               <div className="p-2 rounded-full group-hover:bg-pink-50 transition-colors"><Heart size={22} className="group-active:scale-75 transition-transform" /></div>
                               <span className="text-lg">{post.likes || 0}</span>
                             </button>
-                            <button className="flex items-center gap-2 text-slate-500 hover:text-indigo-500 transition-colors group font-bold">
-                              <div className="p-2 rounded-full group-hover:bg-indigo-50 transition-colors"><MessageCircle size={22} /></div>
+                            <button className="flex items-center gap-2 text-slate-400 hover:text-indigo-400 transition-colors group font-bold">
+                              <div className="p-2 rounded-full group-hover:bg-[#2A2B36] transition-colors"><MessageCircle size={22} /></div>
                               <span className="text-lg">{post.comments || 0}</span>
                             </button>
                           </div>
@@ -614,93 +664,127 @@ export default function App() {
             {/* FRIENDS TAB */}
             {activeTab === 'friends' && (
               <div>
-                <h1 className="text-3xl font-extrabold text-slate-800 mb-6 px-2">Друзья</h1>
+                <div className="flex justify-between items-center mb-6 px-2">
+                  <h1 className="text-3xl font-extrabold text-white">Друзья</h1>
+                  <div className="flex bg-[#2A2B36] rounded-xl p-1">
+                    <button onClick={() => setFriendsTab('all')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${friendsTab === 'all' ? 'bg-[#454656] text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>Все</button>
+                    <button onClick={() => setFriendsTab('online')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${friendsTab === 'online' ? 'bg-[#454656] text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>Онлайн</button>
+                    <button onClick={() => setFriendsTab('requests')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${friendsTab === 'requests' ? 'bg-[#454656] text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>
+                      Заявки
+                      {friends.filter(f => f.user2 === user.uid && f.status === 'pending').length > 0 && (
+                        <span className="ml-2 bg-indigo-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{friends.filter(f => f.user2 === user.uid && f.status === 'pending').length}</span>
+                      )}
+                    </button>
+                  </div>
+                </div>
                 <div className="glass-panel p-2 rounded-2xl flex items-center mb-8 shadow-sm">
                   <Search className="text-slate-400 ml-3" size={20} />
-                  <input type="text" placeholder="Поиск друзей..." value={friendSearch} onChange={e => setFriendSearch(e.target.value)} className="bg-transparent border-none outline-none px-4 py-3 w-full text-slate-700 font-medium placeholder-slate-400" />
+                  <input type="text" placeholder="Поиск друзей..." value={friendSearch} onChange={e => setFriendSearch(e.target.value)} className="bg-transparent border-none outline-none px-4 py-3 w-full text-slate-200 font-medium placeholder-slate-400" />
                 </div>
 
                 <div className="space-y-8">
                   {/* Friend Requests */}
-                  {friends.filter(f => f.user2 === user.uid && f.status === 'pending').length > 0 && (
+                  {friendsTab === 'requests' && (
                     <div>
-                      <h2 className="text-xl font-bold text-slate-700 mb-4 px-2">Заявки в друзья</h2>
-                      <div className="grid gap-4">
-                        {friends.filter(f => f.user2 === user.uid && f.status === 'pending').map(req => {
-                          const reqUser = allUsers.find(u => u.id === req.user1);
-                          if (!reqUser) return null;
+                      <h2 className="text-xl font-bold text-slate-200 mb-4 px-2">Заявки в друзья</h2>
+                      {friends.filter(f => f.user2 === user.uid && f.status === 'pending').length === 0 ? (
+                        <div className="text-center py-8 text-slate-400 font-medium glass-panel rounded-3xl">Нет новых заявок</div>
+                      ) : (
+                        <div className="grid gap-4">
+                          {friends.filter(f => f.user2 === user.uid && f.status === 'pending').map(req => {
+                            const reqUser = allUsers.find(u => u.id === req.user1);
+                            if (!reqUser) return null;
+                            return (
+                              <div key={req.id} className="glass-panel p-4 rounded-2xl flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                  <img src={reqUser.profileImage} alt="" className="w-12 h-12 rounded-full object-cover" />
+                                  <div>
+                                    <div className="font-bold text-white flex items-center gap-1">{reqUser.name} {renderVipBadge(reqUser.vipStatus)}</div>
+                                    <div className="text-sm text-slate-400">@{reqUser.username}</div>
+                                  </div>
+                                </div>
+                                <div className="flex gap-2">
+                                  <button onClick={() => handleAcceptFriend(req.id)} className="glass-button-primary px-4 py-2 rounded-xl font-bold text-sm">Принять</button>
+                                  <button onClick={() => handleRemoveFriend(req.id)} className="glass-button px-4 py-2 rounded-xl font-bold text-sm">Отклонить</button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* My Friends */}
+                  {(friendsTab === 'all' || friendsTab === 'online') && (
+                    <div>
+                      <h2 className="text-xl font-bold text-slate-200 mb-4 px-2">{friendsTab === 'online' ? 'Друзья онлайн' : 'Мои друзья'}</h2>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        {friends.filter(f => f.status === 'accepted').map(f => {
+                          const friendId = f.user1 === user.uid ? f.user2 : f.user1;
+                          const friendUser = allUsers.find(u => u.id === friendId);
+                          if (!friendUser) return null;
+                          if (friendSearch && !friendUser.name.toLowerCase().includes(friendSearch.toLowerCase())) return null;
+                          if (friendsTab === 'online' && !friendUser.isOnline) return null;
                           return (
-                            <div key={req.id} className="glass-panel p-4 rounded-2xl flex items-center justify-between">
-                              <div className="flex items-center gap-4">
-                                <img src={reqUser.profileImage} alt="" className="w-12 h-12 rounded-full object-cover" />
+                            <div key={f.id} className="glass-panel p-4 rounded-2xl flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="relative cursor-pointer" onClick={() => { setActiveTab('profile'); setProfileViewUserId(friendUser.id); }}>
+                                  <img src={friendUser.profileImage} alt="" className="w-12 h-12 rounded-full object-cover" />
+                                  {friendUser.isOnline && <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-[#1A1B22] rounded-full"></div>}
+                                </div>
                                 <div>
-                                  <div className="font-bold text-slate-800">{reqUser.name}</div>
-                                  <div className="text-sm text-slate-500">@{reqUser.username}</div>
+                                  <div className="font-bold text-white flex items-center gap-1 cursor-pointer" onClick={() => { setActiveTab('profile'); setProfileViewUserId(friendUser.id); }}>
+                                    {friendUser.name} {friendUser.isVerified && <BadgeCheck size={14} className="text-indigo-400" />} {renderVipBadge(friendUser.vipStatus)}
+                                  </div>
+                                  {getUserStatus(friendUser)}
                                 </div>
                               </div>
                               <div className="flex gap-2">
-                                <button onClick={() => handleAcceptFriend(req.id)} className="glass-button-primary px-4 py-2 rounded-xl font-bold text-sm">Принять</button>
-                                <button onClick={() => handleRemoveFriend(req.id)} className="glass-button px-4 py-2 rounded-xl font-bold text-sm">Отклонить</button>
+                                <button onClick={() => handleStartChat(friendUser.id)} className="glass-icon-btn"><MessageCircle size={18} /></button>
+                                <button onClick={() => handleRemoveFriend(f.id)} className="glass-icon-btn text-red-400 hover:text-red-500 hover:bg-red-900/30"><UserMinus size={18} /></button>
                               </div>
+                            </div>
+                          );
+                        })}
+                        {friends.filter(f => f.status === 'accepted').filter(f => {
+                          if (friendsTab !== 'online') return true;
+                          const friendId = f.user1 === user.uid ? f.user2 : f.user1;
+                          const friendUser = allUsers.find(u => u.id === friendId);
+                          return friendUser?.isOnline;
+                        }).length === 0 && (
+                          <div className="text-center py-8 text-slate-400 font-medium glass-panel rounded-3xl col-span-full">У вас пока нет {friendsTab === 'online' ? 'друзей онлайн' : 'друзей'}</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Find Users */}
+                  {friendsTab === 'all' && (
+                    <div>
+                      <h2 className="text-xl font-bold text-slate-200 mb-4 px-2">Найти людей</h2>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        {allUsers.filter(u => u.id !== user.uid && (!friendSearch || u.name.toLowerCase().includes(friendSearch.toLowerCase()))).slice(0, 10).map(u => {
+                          const isFriend = friends.some(f => (f.user1 === u.id && f.user2 === user.uid) || (f.user2 === u.id && f.user1 === user.uid));
+                          if (isFriend) return null;
+                          return (
+                            <div key={u.id} className="glass-panel p-4 rounded-2xl flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <img src={u.profileImage} alt="" className="w-12 h-12 rounded-full object-cover cursor-pointer" onClick={() => { setActiveTab('profile'); setProfileViewUserId(u.id); }} />
+                                <div>
+                                  <div className="font-bold text-white flex items-center gap-1 cursor-pointer" onClick={() => { setActiveTab('profile'); setProfileViewUserId(u.id); }}>
+                                    {u.name} {u.isVerified && <BadgeCheck size={14} className="text-indigo-400" />} {renderVipBadge(u.vipStatus)}
+                                  </div>
+                                  <div className="text-sm text-slate-400">@{u.username}</div>
+                                </div>
+                              </div>
+                              <button onClick={() => handleAddFriend(u.id)} className="glass-icon-btn"><UserPlus size={18} /></button>
                             </div>
                           );
                         })}
                       </div>
                     </div>
                   )}
-
-                  {/* My Friends */}
-                  <div>
-                    <h2 className="text-xl font-bold text-slate-700 mb-4 px-2">Мои друзья</h2>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      {friends.filter(f => f.status === 'accepted').map(f => {
-                        const friendId = f.user1 === user.uid ? f.user2 : f.user1;
-                        const friendUser = allUsers.find(u => u.id === friendId);
-                        if (!friendUser) return null;
-                        if (friendSearch && !friendUser.name.toLowerCase().includes(friendSearch.toLowerCase())) return null;
-                        return (
-                          <div key={f.id} className="glass-panel p-4 rounded-2xl flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="relative">
-                                <img src={friendUser.profileImage} alt="" className="w-12 h-12 rounded-full object-cover" />
-                                {friendUser.isOnline && <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-white rounded-full"></div>}
-                              </div>
-                              <div>
-                                <div className="font-bold text-slate-800 flex items-center gap-1">
-                                  {friendUser.name} {friendUser.isVerified && <BadgeCheck size={14} className="text-indigo-500" />}
-                                </div>
-                                {getUserStatus(friendUser)}
-                              </div>
-                            </div>
-                            <button onClick={() => handleStartChat(friendUser.id)} className="glass-icon-btn"><MessageCircle size={18} /></button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Find Users */}
-                  <div>
-                    <h2 className="text-xl font-bold text-slate-700 mb-4 px-2">Найти людей</h2>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      {allUsers.filter(u => u.id !== user.uid && (!friendSearch || u.name.toLowerCase().includes(friendSearch.toLowerCase()))).slice(0, 10).map(u => {
-                        const isFriend = friends.some(f => (f.user1 === u.id && f.user2 === user.uid) || (f.user2 === u.id && f.user1 === user.uid));
-                        if (isFriend) return null;
-                        return (
-                          <div key={u.id} className="glass-panel p-4 rounded-2xl flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <img src={u.profileImage} alt="" className="w-12 h-12 rounded-full object-cover" />
-                              <div>
-                                <div className="font-bold text-slate-800">{u.name}</div>
-                                <div className="text-sm text-slate-500">@{u.username}</div>
-                              </div>
-                            </div>
-                            <button onClick={() => handleAddFriend(u.id)} className="glass-icon-btn"><UserPlus size={18} /></button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
                 </div>
               </div>
             )}
@@ -710,10 +794,10 @@ export default function App() {
               <div className="h-[calc(100vh-120px)] flex flex-col">
                 {!activeChatId ? (
                   <>
-                    <h1 className="text-3xl font-extrabold text-slate-800 mb-6 px-2">Сообщения</h1>
+                    <h1 className="text-3xl font-extrabold text-white mb-6 px-2">Сообщения</h1>
                     <div className="glass-panel p-2 rounded-2xl flex items-center mb-6 shadow-sm">
                       <Search className="text-slate-400 ml-3" size={20} />
-                      <input type="text" placeholder="Поиск диалогов..." value={messageSearch} onChange={e => setMessageSearch(e.target.value)} className="bg-transparent border-none outline-none px-4 py-3 w-full text-slate-700 font-medium placeholder-slate-400" />
+                      <input type="text" placeholder="Поиск диалогов..." value={messageSearch} onChange={e => setMessageSearch(e.target.value)} className="bg-transparent border-none outline-none px-4 py-3 w-full text-slate-200 font-medium placeholder-slate-400" />
                     </div>
                     <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
                       {chats.length === 0 ? (
@@ -725,17 +809,17 @@ export default function App() {
                           if (!otherUser) return null;
                           if (messageSearch && !otherUser.name.toLowerCase().includes(messageSearch.toLowerCase())) return null;
                           return (
-                            <div key={chat.id} onClick={() => setActiveChatId(chat.id)} className="glass-panel p-4 rounded-2xl flex items-center gap-4 cursor-pointer hover:bg-white/90 transition-all">
+                            <div key={chat.id} onClick={() => setActiveChatId(chat.id)} className="glass-panel p-4 rounded-2xl flex items-center gap-4 cursor-pointer hover:bg-[#22232E]/90 transition-all">
                               <div className="relative">
                                 <img src={otherUser.profileImage} alt="" className="w-14 h-14 rounded-full object-cover" />
-                                {otherUser.isOnline && <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-white rounded-full"></div>}
+                                {otherUser.isOnline && <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-[#1A1B22] rounded-full"></div>}
                               </div>
                               <div className="flex-1 overflow-hidden">
                                 <div className="flex justify-between items-center mb-1">
-                                  <div className="font-bold text-slate-800 text-lg">{otherUser.name}</div>
+                                  <div className="font-bold text-white text-lg">{otherUser.name}</div>
                                   <div className="text-xs text-slate-400 font-medium">{formatTimeAgo(chat.updatedAt)}</div>
                                 </div>
-                                <div className="text-slate-500 text-sm truncate font-medium">{chat.lastMessage || 'Нет сообщений'}</div>
+                                <div className="text-slate-400 text-sm truncate font-medium">{chat.lastMessage || 'Нет сообщений'}</div>
                               </div>
                             </div>
                           );
@@ -745,10 +829,10 @@ export default function App() {
                   </>
                 ) : (
                   // Active Chat View
-                  <div className="flex flex-col h-full glass-panel rounded-3xl overflow-hidden shadow-md border border-white/60">
+                  <div className="flex flex-col h-full glass-panel rounded-3xl overflow-hidden shadow-md border border-[#1A1B22]/60">
                     {/* Chat Header */}
-                    <div className="p-4 border-b border-slate-200/50 flex items-center gap-4 bg-white/50 backdrop-blur-md">
-                      <button onClick={() => setActiveChatId(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ChevronLeft size={24} /></button>
+                    <div className="p-4 border-b border-[#3A3B4C]/50 flex items-center gap-4 bg-[#22232E]/50 backdrop-blur-md">
+                      <button onClick={() => setActiveChatId(null)} className="p-2 hover:bg-[#2A2B36] rounded-full transition-colors"><ChevronLeft size={24} /></button>
                       {(() => {
                         const chat = chats.find(c => c.id === activeChatId);
                         const otherUserId = chat?.participants.find((p: string) => p !== user.uid);
@@ -757,7 +841,7 @@ export default function App() {
                           <div className="flex items-center gap-3">
                             <img src={otherUser.profileImage} alt="" className="w-10 h-10 rounded-full object-cover" />
                             <div>
-                              <div className="font-bold text-slate-800">{otherUser.name}</div>
+                              <div className="font-bold text-white">{otherUser.name}</div>
                               {getUserStatus(otherUser)}
                             </div>
                           </div>
@@ -766,12 +850,12 @@ export default function App() {
                     </div>
                     
                     {/* Messages Area */}
-                    <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-slate-50/30">
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-[#1A1B22]/30">
                       {chatMessages.map(msg => {
                         const isMe = msg.senderId === user.uid;
                         return (
                           <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-[75%] p-4 rounded-2xl ${isMe ? 'bg-indigo-500 text-white rounded-br-sm shadow-md shadow-indigo-500/20' : 'bg-white text-slate-800 rounded-bl-sm shadow-sm border border-slate-100'}`}>
+                            <div className={`max-w-[75%] p-4 rounded-2xl ${isMe ? 'bg-[#2A2B36]0 text-white rounded-br-sm shadow-md shadow-indigo-500/20' : 'bg-[#22232E] text-white rounded-bl-sm shadow-sm border border-[#2A2B36]'}`}>
                               <p className="font-medium text-[15px] leading-relaxed break-words">{msg.text}</p>
                               <div className={`text-[10px] mt-2 font-semibold ${isMe ? 'text-indigo-200' : 'text-slate-400'} text-right`}>
                                 {msg.createdAt?.toDate().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
@@ -783,10 +867,10 @@ export default function App() {
                     </div>
                     
                     {/* Input Area */}
-                    <div className="p-4 bg-white/50 backdrop-blur-md border-t border-slate-200/50 flex items-center gap-3">
-                      <button className="p-2.5 text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 rounded-full transition-colors"><ImageIcon size={22} /></button>
-                      <button className="p-2.5 text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 rounded-full transition-colors"><Video size={22} /></button>
-                      <button className="p-2.5 text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 rounded-full transition-colors"><Music size={22} /></button>
+                    <div className="p-4 bg-[#22232E]/50 backdrop-blur-md border-t border-[#3A3B4C]/50 flex items-center gap-3">
+                      <button className="p-2.5 text-slate-400 hover:text-indigo-400 hover:bg-[#2A2B36] rounded-full transition-colors"><ImageIcon size={22} /></button>
+                      <button className="p-2.5 text-slate-400 hover:text-indigo-400 hover:bg-[#2A2B36] rounded-full transition-colors"><Video size={22} /></button>
+                      <button className="p-2.5 text-slate-400 hover:text-indigo-400 hover:bg-[#2A2B36] rounded-full transition-colors"><Music size={22} /></button>
                       <input 
                         type="text" value={newMessageText} onChange={e => setNewMessageText(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
@@ -794,7 +878,7 @@ export default function App() {
                         disabled={currentUserData?.isMuted || currentUserData?.isFrozen}
                         className="flex-1 glass-input rounded-full px-5 py-3 font-medium disabled:opacity-50"
                       />
-                      <button onClick={handleSendMessage} disabled={!newMessageText.trim() || currentUserData?.isMuted || currentUserData?.isFrozen} className="p-3 bg-indigo-500 hover:bg-indigo-600 text-white rounded-full transition-colors disabled:opacity-50 shadow-md shadow-indigo-500/30"><Send size={20} /></button>
+                      <button onClick={handleSendMessage} disabled={!newMessageText.trim() || currentUserData?.isMuted || currentUserData?.isFrozen} className="p-3 bg-[#2A2B36]0 hover:bg-[#555666] text-white rounded-full transition-colors disabled:opacity-50 shadow-md shadow-indigo-500/30"><Send size={20} /></button>
                     </div>
                   </div>
                 )}
@@ -805,7 +889,7 @@ export default function App() {
             {activeTab === 'communities' && (
               <div>
                 <div className="flex justify-between items-center mb-6 px-2">
-                  <h1 className="text-3xl font-extrabold text-slate-800">Сообщества</h1>
+                  <h1 className="text-3xl font-extrabold text-white">Сообщества</h1>
                   <button onClick={() => setIsCreateCommunityModalOpen(true)} disabled={currentUserData?.isFrozen || currentUserData?.isMuted} className="glass-button-primary px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 text-sm disabled:opacity-50">
                     <Plus size={18} /> Создать
                   </button>
@@ -821,13 +905,13 @@ export default function App() {
                           {comm.coverImage && <img src={comm.coverImage} alt="" className="w-full h-full object-cover opacity-60 mix-blend-overlay" />}
                         </div>
                         <div className="p-5 flex-1 flex flex-col">
-                          <h3 className="text-xl font-extrabold text-slate-800 mb-1 flex items-center gap-1">
+                          <h3 className="text-xl font-extrabold text-white mb-1 flex items-center gap-1">
                             {comm.name}
-                            {comm.isVerified && <BadgeCheck size={16} className="text-indigo-500" />}
+                            {comm.isVerified && <BadgeCheck size={16} className="text-indigo-400" />}
                             {comm.isAdmin && <Shield size={16} className="text-purple-500" />}
                           </h3>
-                          <p className="text-sm text-slate-500 font-medium mb-2">@{comm.username}</p>
-                          <p className="text-sm text-slate-500 font-medium mb-4 line-clamp-2 flex-1">{comm.description || 'Нет описания'}</p>
+                          <p className="text-sm text-slate-400 font-medium mb-2">@{comm.username}</p>
+                          <p className="text-sm text-slate-400 font-medium mb-4 line-clamp-2 flex-1">{comm.description || 'Нет описания'}</p>
                           <div className="flex justify-between items-center mt-auto">
                             <span className="text-sm font-bold text-slate-400 flex items-center gap-1.5"><UsersRound size={16}/> {comm.membersCount} участников</span>
                             {isMember ? (
@@ -847,11 +931,11 @@ export default function App() {
             {/* PROFILE TAB */}
             {activeTab === 'profile' && (
               <div className="pb-8">
-                <div className="glass-panel rounded-[2.5rem] overflow-hidden shadow-xl border border-white/60">
+                <div className="glass-panel rounded-[2.5rem] overflow-hidden shadow-xl border border-[#1A1B22]/60">
                   <div className="relative h-48 sm:h-72 w-full overflow-hidden bg-slate-200">
                     <img src={currentUserData.coverImage} alt="Cover" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                     <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 via-transparent to-transparent"></div>
-                    <label className="absolute top-4 right-4 p-3 bg-white/20 hover:bg-white/40 backdrop-blur-md rounded-full text-white transition-all cursor-pointer shadow-sm">
+                    <label className="absolute top-4 right-4 p-3 bg-[#22232E]/20 hover:bg-[#22232E]/40 backdrop-blur-md rounded-full text-white transition-all cursor-pointer shadow-sm">
                       <Camera size={22} />
                       <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'cover')} />
                     </label>
@@ -860,7 +944,7 @@ export default function App() {
                   <div className="px-6 sm:px-10 pb-10">
                     <div className="relative flex justify-between items-end -mt-16 sm:-mt-20 mb-6">
                       <div className="relative z-10">
-                        <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-full border-[6px] border-white bg-slate-100 overflow-hidden shadow-xl group">
+                        <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-full border-[6px] border-[#1A1B22] bg-[#2A2B36] overflow-hidden shadow-xl group">
                           <img src={currentUserData.profileImage} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                           <label className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
                             <Camera size={36} className="text-white" />
@@ -894,16 +978,16 @@ export default function App() {
                           ))}
                         </h1>
                         <motion.div initial={{ scale: 0, rotate: -180 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", delay: 0.5, bounce: 0.5 }} className="flex gap-1.5 ml-1">
-                          {currentUserData.isVerified && <BadgeCheck className="w-8 h-8 text-indigo-500 drop-shadow-sm" />}
+                          {currentUserData.isVerified && <BadgeCheck className="w-8 h-8 text-indigo-400 drop-shadow-sm" />}
                           {currentUserData.isAdmin && <Shield className="w-8 h-8 text-purple-500 drop-shadow-sm" />}
                         </motion.div>
                       </motion.div>
                       
-                      <p className="text-slate-500 font-bold text-lg mb-5">@{currentUserData.username}</p>
+                      <p className="text-slate-400 font-bold text-lg mb-5">@{currentUserData.username}</p>
                       
-                      {currentUserData.status && <p className="text-slate-700 font-medium text-[16px] mb-6 leading-relaxed whitespace-pre-wrap break-words">{currentUserData.status}</p>}
+                      {currentUserData.status && <p className="text-slate-200 font-medium text-[16px] mb-6 leading-relaxed whitespace-pre-wrap break-words">{currentUserData.status}</p>}
 
-                      <div className="flex flex-wrap gap-y-3 gap-x-6 text-sm text-slate-500 mb-6 font-bold bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
+                      <div className="flex flex-wrap gap-y-3 gap-x-6 text-sm text-slate-400 mb-6 font-bold bg-[#1A1B22]/50 p-4 rounded-2xl border border-[#2A2B36]">
                         {currentUserData.location && <div className="flex items-center gap-2"><MapPin size={18} className="text-indigo-400"/><span>{currentUserData.location}</span></div>}
                         {currentUserData.createdAt && <div className="flex items-center gap-2"><Calendar size={18} className="text-indigo-400"/><span>В Jagooars с {currentUserData.createdAt.toDate().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}</span></div>}
                       </div>
@@ -916,33 +1000,34 @@ export default function App() {
                       </div>
                     </div>
 
-                    <h2 className="text-2xl font-extrabold text-slate-800 mb-6 px-1">Мои записи</h2>
+                    <h2 className="text-2xl font-extrabold text-white mb-6 px-1">Мои записи</h2>
                     <div className="space-y-6">
                       {posts.filter(p => p.userId === user.uid).length === 0 ? (
-                        <div className="text-center py-12 text-slate-400 font-bold bg-slate-50/50 rounded-3xl border border-slate-100">У вас пока нет постов.</div>
+                        <div className="text-center py-12 text-slate-400 font-bold bg-[#1A1B22]/50 rounded-3xl border border-[#2A2B36]">У вас пока нет постов.</div>
                       ) : (
                         posts.filter(p => p.userId === user.uid).map(post => {
                           return (
                             <div key={post.id} className="glass-panel rounded-3xl p-6 shadow-sm">
                               <div className="flex justify-between items-start mb-5">
                                 <div className="flex gap-4 items-center">
-                                  <img src={currentUserData.profileImage} alt="Author" className="w-12 h-12 rounded-full object-cover border-2 border-white shadow-sm" />
+                                  <img src={currentUserData.profileImage} alt="Author" className="w-12 h-12 rounded-full object-cover border-2 border-[#1A1B22] shadow-sm" />
                                   <div>
-                                    <div className="font-extrabold text-slate-800 flex items-center gap-1.5 text-lg">
+                                    <div className="font-extrabold text-white flex items-center gap-1.5 text-lg">
                                       {currentUserData.name}
-                                      {currentUserData.isVerified && <BadgeCheck size={18} className="text-indigo-500" />}
+                                      {currentUserData.isVerified && <BadgeCheck size={18} className="text-indigo-400" />}
                                       {currentUserData.isAdmin && <Shield size={16} className="text-purple-500" />}
+                                      {renderVipBadge(currentUserData.vipStatus)}
                                     </div>
-                                    <div className="text-sm text-slate-500 font-medium">@{currentUserData.username} • {formatTimeAgo(post.createdAt)}</div>
+                                    <div className="text-sm text-slate-400 font-medium">@{currentUserData.username} • {formatTimeAgo(post.createdAt)}</div>
                                   </div>
                                 </div>
-                                <button onClick={(e) => handleDeletePost(post.id, e)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"><Trash2 size={20} /></button>
+                                <button onClick={(e) => handleDeletePost(post.id, e)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-900/30 rounded-full transition-colors"><Trash2 size={20} /></button>
                               </div>
-                              {post.text && <p className="text-slate-700 font-medium mb-5 whitespace-pre-wrap text-[16px] leading-relaxed break-words">{post.text}</p>}
-                              {post.image && <div className="rounded-2xl overflow-hidden border border-slate-100 mb-5 shadow-sm"><img src={post.image} alt="Post content" className="w-full h-auto max-h-[500px] object-cover" /></div>}
-                              <div className="flex gap-8 pt-4 border-t border-slate-100">
-                                <div className="flex items-center gap-2 text-slate-500 font-bold"><Heart size={22} /> <span className="text-lg">{post.likes || 0}</span></div>
-                                <div className="flex items-center gap-2 text-slate-500 font-bold"><MessageCircle size={22} /> <span className="text-lg">{post.comments || 0}</span></div>
+                              {post.text && <p className="text-slate-200 font-medium mb-5 whitespace-pre-wrap text-[16px] leading-relaxed break-words">{post.text}</p>}
+                              {post.image && <div className="rounded-2xl overflow-hidden border border-[#2A2B36] mb-5 shadow-sm"><img src={post.image} alt="Post content" className="w-full h-auto max-h-[500px] object-cover" /></div>}
+                              <div className="flex gap-8 pt-4 border-t border-[#2A2B36]">
+                                <div className="flex items-center gap-2 text-slate-400 font-bold"><Heart size={22} /> <span className="text-lg">{post.likes || 0}</span></div>
+                                <div className="flex items-center gap-2 text-slate-400 font-bold"><MessageCircle size={22} /> <span className="text-lg">{post.comments || 0}</span></div>
                               </div>
                             </div>
                           );
@@ -962,28 +1047,28 @@ export default function App() {
       <AnimatePresence>
         {isEditModalOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-[2rem] w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col shadow-2xl">
-              <div className="flex justify-between items-center p-6 border-b border-slate-100">
-                <h2 className="text-2xl font-extrabold text-slate-800">Настройки профиля</h2>
-                <button onClick={() => setIsEditModalOpen(false)} className="text-slate-400 hover:text-slate-700 bg-slate-50 hover:bg-slate-100 p-2 rounded-full transition-colors"><X size={20} /></button>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-[#22232E] rounded-[2rem] w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col shadow-2xl">
+              <div className="flex justify-between items-center p-6 border-b border-[#2A2B36]">
+                <h2 className="text-2xl font-extrabold text-white">Настройки профиля</h2>
+                <button onClick={() => setIsEditModalOpen(false)} className="text-slate-400 hover:text-slate-200 bg-[#1A1B22] hover:bg-[#2A2B36] p-2 rounded-full transition-colors"><X size={20} /></button>
               </div>
               <div className="p-6 space-y-5 overflow-y-auto custom-scrollbar">
                 {profileError && (
-                  <div className="p-4 bg-red-50 text-red-600 text-sm rounded-xl border border-red-100">
+                  <div className="p-4 bg-red-900/30 text-red-600 text-sm rounded-xl border border-red-100">
                     {profileError}
                   </div>
                 )}
-                <div><label className="block text-sm font-bold text-slate-600 mb-2">Имя и фамилия</label><input type="text" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} className="glass-input rounded-xl px-4 py-3 w-full font-medium" /></div>
-                <div><label className="block text-sm font-bold text-slate-600 mb-2">Имя пользователя (@iduser)</label><input type="text" value={editForm.username} onChange={e => setEditForm({...editForm, username: e.target.value})} className="glass-input rounded-xl px-4 py-3 w-full font-medium" /></div>
-                <div><label className="block text-sm font-bold text-slate-600 mb-2">Город, Страна</label><input type="text" value={editForm.location} onChange={e => setEditForm({...editForm, location: e.target.value})} className="glass-input rounded-xl px-4 py-3 w-full font-medium" /></div>
-                <div><label className="block text-sm font-bold text-slate-600 mb-2">О себе</label><textarea value={editForm.status} onChange={e => setEditForm({...editForm, status: e.target.value})} rows={3} className="glass-input rounded-xl px-4 py-3 w-full resize-none font-medium" /></div>
-                <h3 className="text-sm font-bold text-slate-800 pt-4 border-t border-slate-100">Социальные сети</h3>
+                <div><label className="block text-sm font-bold text-slate-300 mb-2">Имя и фамилия</label><input type="text" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} className="glass-input rounded-xl px-4 py-3 w-full font-medium" /></div>
+                <div><label className="block text-sm font-bold text-slate-300 mb-2">Имя пользователя (@iduser)</label><input type="text" value={editForm.username} onChange={e => setEditForm({...editForm, username: e.target.value})} className="glass-input rounded-xl px-4 py-3 w-full font-medium" /></div>
+                <div><label className="block text-sm font-bold text-slate-300 mb-2">Город, Страна</label><input type="text" value={editForm.location} onChange={e => setEditForm({...editForm, location: e.target.value})} className="glass-input rounded-xl px-4 py-3 w-full font-medium" /></div>
+                <div><label className="block text-sm font-bold text-slate-300 mb-2">О себе</label><textarea value={editForm.status} onChange={e => setEditForm({...editForm, status: e.target.value})} rows={3} className="glass-input rounded-xl px-4 py-3 w-full resize-none font-medium" /></div>
+                <h3 className="text-sm font-bold text-white pt-4 border-t border-[#2A2B36]">Социальные сети</h3>
                 <div className="relative"><Github className="absolute left-4 top-3.5 text-slate-400" size={20} /><input type="text" placeholder="https://github.com/..." value={editForm.github} onChange={e => setEditForm({...editForm, github: e.target.value})} className="glass-input rounded-xl pl-12 pr-4 py-3 w-full font-medium" /></div>
                 <div className="relative"><Twitter className="absolute left-4 top-3.5 text-slate-400" size={20} /><input type="text" placeholder="https://twitter.com/..." value={editForm.twitter} onChange={e => setEditForm({...editForm, twitter: e.target.value})} className="glass-input rounded-xl pl-12 pr-4 py-3 w-full font-medium" /></div>
                 <div className="relative"><Instagram className="absolute left-4 top-3.5 text-slate-400" size={20} /><input type="text" placeholder="https://instagram.com/..." value={editForm.instagram} onChange={e => setEditForm({...editForm, instagram: e.target.value})} className="glass-input rounded-xl pl-12 pr-4 py-3 w-full font-medium" /></div>
                 <div className="relative"><Globe className="absolute left-4 top-3.5 text-slate-400" size={20} /><input type="text" placeholder="https://вассайт.com" value={editForm.website} onChange={e => setEditForm({...editForm, website: e.target.value})} className="glass-input rounded-xl pl-12 pr-4 py-3 w-full font-medium" /></div>
               </div>
-              <div className="p-6 border-t border-slate-100 flex justify-end gap-3 bg-slate-50">
+              <div className="p-6 border-t border-[#2A2B36] flex justify-end gap-3 bg-[#1A1B22]">
                 <button onClick={() => setIsEditModalOpen(false)} className="glass-button px-6 py-3 rounded-xl font-bold">Отмена</button>
                 <button onClick={handleSaveProfile} disabled={isSaving} className="glass-button-primary px-8 py-3 rounded-xl font-bold disabled:opacity-70">{isSaving ? 'Сохранение...' : 'Сохранить'}</button>
               </div>
@@ -996,17 +1081,17 @@ export default function App() {
       <AnimatePresence>
         {isCreateCommunityModalOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-[2rem] w-full max-w-md overflow-hidden shadow-2xl">
-              <div className="flex justify-between items-center p-6 border-b border-slate-100">
-                <h2 className="text-2xl font-extrabold text-slate-800">Новое сообщество</h2>
-                <button onClick={() => setIsCreateCommunityModalOpen(false)} className="text-slate-400 hover:text-slate-700 bg-slate-50 hover:bg-slate-100 p-2 rounded-full transition-colors"><X size={20} /></button>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-[#22232E] rounded-[2rem] w-full max-w-md overflow-hidden shadow-2xl">
+              <div className="flex justify-between items-center p-6 border-b border-[#2A2B36]">
+                <h2 className="text-2xl font-extrabold text-white">Новое сообщество</h2>
+                <button onClick={() => setIsCreateCommunityModalOpen(false)} className="text-slate-400 hover:text-slate-200 bg-[#1A1B22] hover:bg-[#2A2B36] p-2 rounded-full transition-colors"><X size={20} /></button>
               </div>
               <div className="p-6 space-y-5">
-                <div><label className="block text-sm font-bold text-slate-600 mb-2">Название</label><input type="text" value={newCommunityName} onChange={e => setNewCommunityName(e.target.value)} className="glass-input rounded-xl px-4 py-3 w-full font-medium" /></div>
-                <div><label className="block text-sm font-bold text-slate-600 mb-2">Уникальный @id</label><input type="text" value={newCommunityUsername} onChange={e => setNewCommunityUsername(e.target.value)} placeholder="Например: my_group" className="glass-input rounded-xl px-4 py-3 w-full font-medium" /></div>
-                <div><label className="block text-sm font-bold text-slate-600 mb-2">Описание</label><textarea value={newCommunityDesc} onChange={e => setNewCommunityDesc(e.target.value)} rows={3} className="glass-input rounded-xl px-4 py-3 w-full resize-none font-medium" /></div>
+                <div><label className="block text-sm font-bold text-slate-300 mb-2">Название</label><input type="text" value={newCommunityName} onChange={e => setNewCommunityName(e.target.value)} className="glass-input rounded-xl px-4 py-3 w-full font-medium" /></div>
+                <div><label className="block text-sm font-bold text-slate-300 mb-2">Уникальный @id</label><input type="text" value={newCommunityUsername} onChange={e => setNewCommunityUsername(e.target.value)} placeholder="Например: my_group" className="glass-input rounded-xl px-4 py-3 w-full font-medium" /></div>
+                <div><label className="block text-sm font-bold text-slate-300 mb-2">Описание</label><textarea value={newCommunityDesc} onChange={e => setNewCommunityDesc(e.target.value)} rows={3} className="glass-input rounded-xl px-4 py-3 w-full resize-none font-medium" /></div>
               </div>
-              <div className="p-6 border-t border-slate-100 flex justify-end gap-3 bg-slate-50">
+              <div className="p-6 border-t border-[#2A2B36] flex justify-end gap-3 bg-[#1A1B22]">
                 <button onClick={() => setIsCreateCommunityModalOpen(false)} className="glass-button px-6 py-3 rounded-xl font-bold">Отмена</button>
                 <button onClick={handleCreateCommunity} disabled={!newCommunityName.trim() || !newCommunityUsername.trim()} className="glass-button-primary px-8 py-3 rounded-xl font-bold disabled:opacity-70">Создать</button>
               </div>
@@ -1019,68 +1104,73 @@ export default function App() {
       <AnimatePresence>
         {isAdminPanelOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-white rounded-[2rem] w-full max-w-4xl overflow-hidden max-h-[90vh] flex flex-col shadow-2xl">
-              <div className="flex justify-between items-center p-6 border-b border-slate-100">
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-[#22232E] rounded-[2rem] w-full max-w-4xl overflow-hidden max-h-[90vh] flex flex-col shadow-2xl">
+              <div className="flex justify-between items-center p-6 border-b border-[#2A2B36]">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center">
+                  <div className="w-10 h-10 bg-[#2A2B36] text-indigo-400 rounded-xl flex items-center justify-center">
                     <Shield size={24} />
                   </div>
-                  <h2 className="text-2xl font-extrabold text-slate-800">Админ Панель</h2>
+                  <h2 className="text-2xl font-extrabold text-white">Админ Панель</h2>
                 </div>
-                <button onClick={() => setIsAdminPanelOpen(false)} className="text-slate-400 hover:text-slate-700 bg-slate-50 hover:bg-slate-100 p-2 rounded-full transition-colors"><X size={20} /></button>
+                <button onClick={() => setIsAdminPanelOpen(false)} className="text-slate-400 hover:text-slate-200 bg-[#1A1B22] hover:bg-[#2A2B36] p-2 rounded-full transition-colors"><X size={20} /></button>
               </div>
               
-              <div className="flex border-b border-slate-100 px-6">
-                <button onClick={() => setAdminTab('users')} className={`px-6 py-4 font-bold text-sm transition-colors border-b-2 ${adminTab === 'users' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>Пользователи</button>
-                <button onClick={() => setAdminTab('communities')} className={`px-6 py-4 font-bold text-sm transition-colors border-b-2 ${adminTab === 'communities' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>Сообщества</button>
+              <div className="flex border-b border-[#2A2B36] px-6">
+                <button onClick={() => setAdminTab('users')} className={`px-6 py-4 font-bold text-sm transition-colors border-b-2 ${adminTab === 'users' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-white'}`}>Пользователи</button>
+                <button onClick={() => setAdminTab('communities')} className={`px-6 py-4 font-bold text-sm transition-colors border-b-2 ${adminTab === 'communities' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-400 hover:text-white'}`}>Сообщества</button>
               </div>
 
-              <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-slate-50/50">
+              <div className="p-6 overflow-y-auto custom-scrollbar flex-1 bg-[#1A1B22]/50">
                 <div className="space-y-4">
                   {adminTab === 'users' && allUsers.map(u => (
-                    <div key={u.id} className="bg-white p-4 rounded-2xl border border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm">
+                    <div key={u.id} className="bg-[#22232E] p-4 rounded-2xl border border-[#2A2B36] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm">
                       <div className="flex items-center gap-3">
                         <img src={u.profileImage || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.name)}&background=random`} alt={u.name} className="w-12 h-12 rounded-full object-cover" />
                         <div>
-                          <p className="font-bold text-slate-800 flex items-center gap-1">
+                          <p className="font-bold text-white flex items-center gap-1">
                             {u.name}
-                            {u.isVerified && <BadgeCheck size={16} className="text-indigo-500" />}
+                            {u.isVerified && <BadgeCheck size={16} className="text-indigo-400" />}
                             {u.isAdmin && <Shield size={16} className="text-purple-500" />}
+                            {renderVipBadge(u.vipStatus)}
                           </p>
-                          <p className="text-sm text-slate-500">@{u.username}</p>
+                          <p className="text-sm text-slate-400">@{u.username}</p>
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <button onClick={() => handleToggleUserStatus(u.id, 'isAdmin', u.isAdmin)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${u.isAdmin ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Admin</button>
-                        <button onClick={() => handleToggleUserStatus(u.id, 'isVerified', u.isVerified)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${u.isVerified ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Verified</button>
-                        <button onClick={() => handleToggleUserStatus(u.id, 'isMuted', u.isMuted)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${u.isMuted ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Muted</button>
-                        <button onClick={() => handleToggleUserStatus(u.id, 'isFrozen', u.isFrozen)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${u.isFrozen ? 'bg-cyan-100 text-cyan-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Frozen</button>
-                        <button onClick={() => handleToggleUserStatus(u.id, 'isBanned', u.isBanned)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${u.isBanned ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Banned</button>
+                        <button onClick={() => handleToggleUserStatus(u.id, 'isAdmin', u.isAdmin)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${u.isAdmin ? 'bg-purple-900/30 text-purple-300' : 'bg-[#2A2B36] text-slate-300 hover:bg-[#3A3B4C]'}`}>Admin</button>
+                        <button onClick={() => handleToggleUserStatus(u.id, 'isVerified', u.isVerified)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${u.isVerified ? 'bg-indigo-900/30 text-indigo-300' : 'bg-[#2A2B36] text-slate-300 hover:bg-[#3A3B4C]'}`}>Verified</button>
+                        <button onClick={() => handleToggleUserStatus(u.id, 'isMuted', u.isMuted)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${u.isMuted ? 'bg-orange-900/30 text-orange-300' : 'bg-[#2A2B36] text-slate-300 hover:bg-[#3A3B4C]'}`}>Muted</button>
+                        <button onClick={() => handleToggleUserStatus(u.id, 'isFrozen', u.isFrozen)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${u.isFrozen ? 'bg-cyan-900/30 text-cyan-300' : 'bg-[#2A2B36] text-slate-300 hover:bg-[#3A3B4C]'}`}>Frozen</button>
+                        <button onClick={() => handleToggleUserStatus(u.id, 'isBanned', u.isBanned)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${u.isBanned ? 'bg-red-900/30 text-red-300' : 'bg-[#2A2B36] text-slate-300 hover:bg-[#3A3B4C]'}`}>Banned</button>
+                        <div className="h-4 w-px bg-[#3A3B4C] mx-1 self-center"></div>
+                        <button onClick={() => handleSetUserVip(u.id, u.vipStatus === 'bronze' ? 'none' : 'bronze')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${u.vipStatus === 'bronze' ? 'bg-amber-900/40 text-amber-500' : 'bg-[#2A2B36] text-slate-300 hover:bg-[#3A3B4C]'}`}>VIP Bronze</button>
+                        <button onClick={() => handleSetUserVip(u.id, u.vipStatus === 'silver' ? 'none' : 'silver')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${u.vipStatus === 'silver' ? 'bg-slate-300/20 text-slate-300' : 'bg-[#2A2B36] text-slate-300 hover:bg-[#3A3B4C]'}`}>VIP Silver</button>
+                        <button onClick={() => handleSetUserVip(u.id, u.vipStatus === 'gold' ? 'none' : 'gold')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${u.vipStatus === 'gold' ? 'bg-yellow-900/40 text-yellow-400' : 'bg-[#2A2B36] text-slate-300 hover:bg-[#3A3B4C]'}`}>VIP Gold</button>
                       </div>
                     </div>
                   ))}
 
                   {adminTab === 'communities' && communities.map(c => (
-                    <div key={c.id} className="bg-white p-4 rounded-2xl border border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm">
+                    <div key={c.id} className="bg-[#22232E] p-4 rounded-2xl border border-[#2A2B36] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm">
                       <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-500 font-bold text-xl">
+                        <div className="w-12 h-12 bg-[#2A2B36] rounded-xl flex items-center justify-center text-indigo-400 font-bold text-xl">
                           {c.name.charAt(0).toUpperCase()}
                         </div>
                         <div>
-                          <p className="font-bold text-slate-800 flex items-center gap-1">
+                          <p className="font-bold text-white flex items-center gap-1">
                             {c.name}
-                            {c.isVerified && <BadgeCheck size={16} className="text-indigo-500" />}
+                            {c.isVerified && <BadgeCheck size={16} className="text-indigo-400" />}
                             {c.isAdmin && <Shield size={16} className="text-purple-500" />}
                           </p>
-                          <p className="text-sm text-slate-500">@{c.username}</p>
+                          <p className="text-sm text-slate-400">@{c.username}</p>
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <button onClick={() => handleToggleCommunityStatus(c.id, 'isAdmin', c.isAdmin)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${c.isAdmin ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Admin</button>
-                        <button onClick={() => handleToggleCommunityStatus(c.id, 'isVerified', c.isVerified)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${c.isVerified ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Verified</button>
-                        <button onClick={() => handleToggleCommunityStatus(c.id, 'isMuted', c.isMuted)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${c.isMuted ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Muted</button>
-                        <button onClick={() => handleToggleCommunityStatus(c.id, 'isFrozen', c.isFrozen)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${c.isFrozen ? 'bg-cyan-100 text-cyan-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Frozen</button>
-                        <button onClick={() => handleToggleCommunityStatus(c.id, 'isBanned', c.isBanned)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${c.isBanned ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Banned</button>
+                        <button onClick={() => handleToggleCommunityStatus(c.id, 'isAdmin', c.isAdmin)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${c.isAdmin ? 'bg-purple-900/30 text-purple-300' : 'bg-[#2A2B36] text-slate-300 hover:bg-[#3A3B4C]'}`}>Admin</button>
+                        <button onClick={() => handleToggleCommunityStatus(c.id, 'isVerified', c.isVerified)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${c.isVerified ? 'bg-indigo-900/30 text-indigo-300' : 'bg-[#2A2B36] text-slate-300 hover:bg-[#3A3B4C]'}`}>Verified</button>
+                        <button onClick={() => handleToggleCommunityStatus(c.id, 'isMuted', c.isMuted)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${c.isMuted ? 'bg-orange-900/30 text-orange-300' : 'bg-[#2A2B36] text-slate-300 hover:bg-[#3A3B4C]'}`}>Muted</button>
+                        <button onClick={() => handleToggleCommunityStatus(c.id, 'isFrozen', c.isFrozen)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${c.isFrozen ? 'bg-cyan-900/30 text-cyan-300' : 'bg-[#2A2B36] text-slate-300 hover:bg-[#3A3B4C]'}`}>Frozen</button>
+                        <button onClick={() => handleToggleCommunityStatus(c.id, 'isBanned', c.isBanned)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${c.isBanned ? 'bg-red-900/30 text-red-300' : 'bg-[#2A2B36] text-slate-300 hover:bg-[#3A3B4C]'}`}>Banned</button>
                       </div>
                     </div>
                   ))}
