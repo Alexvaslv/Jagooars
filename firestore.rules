@@ -111,6 +111,7 @@ service cloud.firestore {
         (!( 'isMuted' in request.resource.data ) || request.resource.data.isMuted is bool) &&
         (!( 'isBanned' in request.resource.data ) || request.resource.data.isBanned is bool) &&
         (!( 'isFrozen' in request.resource.data ) || request.resource.data.isFrozen is bool) &&
+        (!( 'followersCount' in request.resource.data ) || request.resource.data.followersCount is number) &&
         request.resource.data.createdAt is timestamp;
     }
 
@@ -156,13 +157,13 @@ service cloud.firestore {
     }
 
     function isValidCommunity() {
-      return hasRequiredFields(['name', 'username', 'ownerId', 'membersCount', 'createdAt']) &&
+      return hasRequiredFields(['name', 'username', 'ownerId', 'followersCount', 'createdAt']) &&
         isValidStringLength('name', 1, 100) &&
         isValidStringLength('username', 1, 50) &&
         request.resource.data.ownerId == request.auth.uid &&
         isValidOptionalString('description', 0, 1000) &&
         isValidOptionalString('coverImage', 0, 1000000) &&
-        request.resource.data.membersCount is number &&
+        request.resource.data.followersCount is number &&
         (!( 'isAdmin' in request.resource.data ) || request.resource.data.isAdmin is bool) &&
         (!( 'isVerified' in request.resource.data ) || request.resource.data.isVerified is bool) &&
         (!( 'isMuted' in request.resource.data ) || request.resource.data.isMuted is bool) &&
@@ -192,7 +193,11 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow create: if isOwner(userId) && isValidUser() && uidUnchanged() && (!('isAdmin' in request.resource.data) || isAdmin()) && (!('isVerified' in request.resource.data) || isAdmin()) && (!('isMuted' in request.resource.data) || isAdmin()) && (!('isBanned' in request.resource.data) || isAdmin()) && (!('isFrozen' in request.resource.data) || isAdmin());
-      allow update: if (isOwner(userId) && isValidUser() && uidNotModified() && areImmutableFieldsUnchanged(['createdAt']) && isUserPrivilegeUnchanged()) || isAdmin();
+      allow update: if (
+        (isOwner(userId) && isValidUser() && uidNotModified() && areImmutableFieldsUnchanged(['createdAt']) && isUserPrivilegeUnchanged()) || 
+        isAdmin() ||
+        (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followersCount']) && math.abs(request.resource.data.followersCount - resource.data.followersCount) == 1)
+      );
       allow delete: if isOwner(userId) || isAdmin();
     }
 
@@ -220,7 +225,11 @@ service cloud.firestore {
     match /communities/{communityId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidCommunity() && (!('isAdmin' in request.resource.data) || isAdmin()) && (!('isVerified' in request.resource.data) || isAdmin()) && (!('isMuted' in request.resource.data) || isAdmin()) && (!('isBanned' in request.resource.data) || isAdmin()) && (!('isFrozen' in request.resource.data) || isAdmin());
-      allow update: if isAuthenticated() && ((request.auth.uid == resource.data.ownerId && isCommunityPrivilegeUnchanged()) || isAdmin()) && areImmutableFieldsUnchanged(['createdAt', 'ownerId']);
+      allow update: if isAuthenticated() && (
+        (request.auth.uid == resource.data.ownerId && isCommunityPrivilegeUnchanged()) || 
+        isAdmin() ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followersCount']) && math.abs(request.resource.data.followersCount - resource.data.followersCount) == 1)
+      ) && areImmutableFieldsUnchanged(['createdAt', 'ownerId']);
       allow delete: if isAuthenticated() && (request.auth.uid == resource.data.ownerId || isAdmin());
     }
 
@@ -236,6 +245,13 @@ service cloud.firestore {
       allow create: if isAuthenticated() && isValidFriend();
       allow update: if isAuthenticated() && isValidFriend() && areImmutableFieldsUnchanged(['createdAt', 'user1', 'user2']);
       allow delete: if isAuthenticated() && (request.auth.uid == resource.data.user1 || request.auth.uid == resource.data.user2);
+    }
+
+    match /follows/{followId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.followerId == request.auth.uid && request.resource.data.type in ['user', 'community'];
+      allow update: if false;
+      allow delete: if isAuthenticated() && resource.data.followerId == request.auth.uid;
     }
   }
 }
