@@ -61,6 +61,7 @@ export default function App() {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
   
   // Real-time state
   const [followers, setFollowers] = useState(12500);
@@ -127,11 +128,17 @@ export default function App() {
   }, [user, isAuthReady]);
 
   const handleLogin = async () => {
+    setLoginError(null);
     const provider = new GoogleAuthProvider();
     try {
       await signInWithPopup(auth, provider);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login failed", error);
+      if (error.code === 'auth/unauthorized-domain') {
+        setLoginError("Домен jagooars.vercel.app не разрешен в Firebase. Добавьте его в консоли Firebase (Authentication -> Settings -> Authorized domains).");
+      } else {
+        setLoginError(error.message || "Произошла ошибка при авторизации.");
+      }
     }
   };
 
@@ -275,7 +282,15 @@ export default function App() {
             <Settings size={40} />
           </div>
           <h1 className="text-3xl font-bold text-slate-900 mb-2">Добро пожаловать</h1>
-          <p className="text-slate-500 mb-8">Войдите, чтобы создать и настроить свой профиль.</p>
+          <p className="text-slate-500 mb-6">Войдите, чтобы создать и настроить свой профиль.</p>
+          
+          {loginError && (
+            <div className="mb-6 p-4 bg-red-50 text-red-600 text-sm rounded-xl border border-red-100 text-left">
+              <p className="font-semibold mb-1">Ошибка входа:</p>
+              <p>{loginError}</p>
+            </div>
+          )}
+
           <button 
             onClick={handleLogin}
             className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-all active:scale-95 shadow-md flex items-center justify-center gap-2"

@@ -9,15 +9,28 @@ service cloud.firestore {
     // Collection: users
     // Document ID: {userId}
     // Fields:
-    //   - uid: string (required) - The user's ID
-    //   - name: string (required, max 100 chars) - The user's full name
-    //   - username: string (required, max 50 chars) - The user's handle
-    //   - location: string (optional, max 100 chars) - The user's location
-    //   - status: string (optional, max 500 chars) - The user's bio
-    //   - profileImage: string (optional, max 1000 chars) - Profile image URL
-    //   - coverImage: string (optional, max 1000 chars) - Cover image URL
-    //   - createdAt: timestamp (required) - Creation time
+    //   - uid: string (required)
+    //   - name: string (required, max 100 chars)
+    //   - username: string (required, max 50 chars)
+    //   - location: string (optional, max 100 chars)
+    //   - status: string (optional, max 500 chars)
+    //   - profileImage: string (optional, max 1000000 chars)
+    //   - coverImage: string (optional, max 1000000 chars)
+    //   - github: string (optional, max 100 chars)
+    //   - twitter: string (optional, max 100 chars)
+    //   - instagram: string (optional, max 100 chars)
+    //   - website: string (optional, max 100 chars)
+    //   - createdAt: timestamp (required)
     //
+    // Collection: posts
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required)
+    //   - text: string (optional, max 2000 chars)
+    //   - image: string (optional, max 1000000 chars)
+    //   - likes: number (required)
+    //   - comments: number (required)
+    //   - createdAt: timestamp (required)
     // ===============================================================
 
     // ===============================================================
@@ -70,16 +83,47 @@ service cloud.firestore {
         isValidStringLength('username', 1, 50) &&
         isValidOptionalString('location', 0, 100) &&
         isValidOptionalString('status', 0, 500) &&
-        isValidOptionalString('profileImage', 0, 1000) &&
-        isValidOptionalString('coverImage', 0, 1000) &&
+        isValidOptionalString('profileImage', 0, 1000000) &&
+        isValidOptionalString('coverImage', 0, 1000000) &&
+        isValidOptionalString('github', 0, 100) &&
+        isValidOptionalString('twitter', 0, 100) &&
+        isValidOptionalString('instagram', 0, 100) &&
+        isValidOptionalString('website', 0, 100) &&
         request.resource.data.createdAt is timestamp;
     }
 
+    function isValidPost() {
+      return hasRequiredFields(['userId', 'likes', 'comments', 'createdAt']) &&
+        isValidStringLength('userId', 1, 128) &&
+        request.resource.data.userId == request.auth.uid &&
+        isValidOptionalString('text', 0, 2000) &&
+        isValidOptionalString('image', 0, 1000000) &&
+        request.resource.data.likes is number &&
+        request.resource.data.comments is number &&
+        request.resource.data.createdAt is timestamp;
+    }
+
+    function isValidPostUpdate() {
+      // Allow updating likes only, or full update if owner
+      let isOwnerUpdate = request.auth.uid == resource.data.userId && isValidPost();
+      let isLikeUpdate = request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes']) &&
+                         request.resource.data.likes is number &&
+                         (request.resource.data.likes - resource.data.likes == 1 || request.resource.data.likes - resource.data.likes == -1);
+      return isOwnerUpdate || isLikeUpdate;
+    }
+
     match /users/{userId} {
-      allow read: if isOwner(userId);
+      allow read: if isAuthenticated(); // Allow anyone authenticated to read profiles
       allow create: if isOwner(userId) && isValidUser() && uidUnchanged();
       allow update: if isOwner(userId) && isValidUser() && uidNotModified() && areImmutableFieldsUnchanged(['createdAt']);
       allow delete: if isOwner(userId);
+    }
+
+    match /posts/{postId} {
+      allow read: if isAuthenticated(); // Allow anyone authenticated to read posts
+      allow create: if isAuthenticated() && isValidPost();
+      allow update: if isAuthenticated() && isValidPostUpdate() && areImmutableFieldsUnchanged(['createdAt', 'userId']);
+      allow delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
     }
   }
 }
