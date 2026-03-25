@@ -1,0 +1,52 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user profile in the application.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "The unique identifier of the user."
+        },
+        "name": {
+          "type": "string",
+          "description": "The user's full name."
+        },
+        "username": {
+          "type": "string",
+          "description": "The user's handle (@username)."
+        },
+        "location": {
+          "type": "string",
+          "description": "The user's location."
+        },
+        "status": {
+          "type": "string",
+          "description": "The user's status or bio."
+        },
+        "profileImage": {
+          "type": "string",
+          "description": "URL to the user's profile image."
+        },
+        "coverImage": {
+          "type": "string",
+          "description": "URL to the user's cover image."
+        },
+        "createdAt": {
+          "type": "timestamp",
+          "description": "When the user profile was created."
+        }
+      },
+      "required": ["uid", "name", "username"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/User"
+      },
+      "description": "Stores user profiles."
+    }
+  }
+}
