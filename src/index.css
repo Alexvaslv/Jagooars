@@ -1,4 +1,9 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+}
 
 @layer utilities {
   .custom-scrollbar::-webkit-scrollbar {
@@ -8,12 +13,71 @@
     background: transparent;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background-color: #cbd5e1; /* slate-300 */
+    background-color: rgba(0, 0, 0, 0.15);
     border-radius: 20px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(0, 0, 0, 0.25);
+  }
+
+  /* Light Glassmorphism Utilities */
+  .glass-panel {
+    @apply bg-white/70 backdrop-blur-xl border border-white/50 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)];
+  }
+  .glass-sidebar {
+    @apply bg-white/80 backdrop-blur-xl border-slate-200/50;
+  }
+  .glass-input {
+    @apply bg-slate-50/50 border border-slate-200/50 focus:bg-white focus:border-indigo-500/50 text-slate-900 placeholder-slate-400 transition-all shadow-inner;
+  }
+  .glass-button {
+    @apply bg-white/60 hover:bg-white border border-slate-200/50 text-slate-700 hover:text-indigo-600 transition-all shadow-sm hover:shadow-md;
+  }
+  .glass-button-primary {
+    @apply bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white shadow-lg shadow-indigo-500/25 transition-all border-none;
+  }
+  .glass-icon-btn {
+    @apply p-2 rounded-full bg-white/50 hover:bg-white border border-slate-200/50 text-slate-500 hover:text-indigo-600 transition-all shadow-sm hover:shadow-md;
+  }
+  
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600;
+    animation: gradient-x 4s ease infinite;
   }
 }
 
 body {
-  background-color: #f8fafc; /* slate-50 */
   color: #0f172a; /* slate-900 */
+  min-height: 100vh;
+  margin: 0;
+  background-color: #f8fafc;
+  font-family: "Plus Jakarta Sans", sans-serif;
+}
+
+/* Hardware-accelerated fixed background for light theme */
+.bg-gradient-fixed {
+  position: fixed;
+  inset: 0;
+  background-color: #f8fafc;
+  background-image: 
+    radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.1) 0%, transparent 50%),
+    radial-gradient(circle at 85% 30%, rgba(168, 85, 247, 0.1) 0%, transparent 50%),
+    radial-gradient(circle at 50% 80%, rgba(236, 72, 153, 0.1) 0%, transparent 50%);
+  z-index: -2;
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+@keyframes gradient-x {
+  0%, 100% {
+    background-size: 200% 200%;
+    background-position: left center;
+  }
+  50% {
+    background-size: 200% 200%;
+    background-position: right center;
+  }
+}
+.animate-gradient-x {
+  animation: gradient-x 3s ease infinite;
 }

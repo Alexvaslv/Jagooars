@@ -5,48 +5,124 @@
       "description": "A user profile in the application.",
       "type": "object",
       "properties": {
-        "uid": {
-          "type": "string",
-          "description": "The unique identifier of the user."
-        },
-        "name": {
-          "type": "string",
-          "description": "The user's full name."
-        },
-        "username": {
-          "type": "string",
-          "description": "The user's handle (@username)."
-        },
-        "location": {
-          "type": "string",
-          "description": "The user's location."
-        },
-        "status": {
-          "type": "string",
-          "description": "The user's status or bio."
-        },
-        "profileImage": {
-          "type": "string",
-          "description": "URL to the user's profile image."
-        },
-        "coverImage": {
-          "type": "string",
-          "description": "URL to the user's cover image."
-        },
-        "createdAt": {
-          "type": "timestamp",
-          "description": "When the user profile was created."
-        }
+        "uid": { "type": "string", "description": "The unique identifier of the user." },
+        "name": { "type": "string", "description": "The user's full name." },
+        "username": { "type": "string", "description": "The user's handle (@username)." },
+        "location": { "type": "string", "description": "The user's location." },
+        "status": { "type": "string", "description": "The user's status or bio." },
+        "profileImage": { "type": "string", "description": "URL to the user's profile image." },
+        "coverImage": { "type": "string", "description": "URL to the user's cover image." },
+        "github": { "type": "string" },
+        "twitter": { "type": "string" },
+        "instagram": { "type": "string" },
+        "website": { "type": "string" },
+        "isOnline": { "type": "boolean", "description": "Whether the user is currently online." },
+        "lastSeen": { "type": "timestamp", "description": "When the user was last seen." },
+        "isAdmin": { "type": "boolean", "description": "Whether the user is an admin." },
+        "isVerified": { "type": "boolean", "description": "Whether the user is verified." },
+        "isMuted": { "type": "boolean", "description": "Whether the user is muted." },
+        "isBanned": { "type": "boolean", "description": "Whether the user is banned." },
+        "isFrozen": { "type": "boolean", "description": "Whether the user is frozen." },
+        "createdAt": { "type": "timestamp", "description": "When the user profile was created." }
       },
       "required": ["uid", "name", "username"]
+    },
+    "Post": {
+      "title": "Post",
+      "description": "A user post.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorUsername": { "type": "string" },
+        "authorImage": { "type": "string" },
+        "text": { "type": "string" },
+        "image": { "type": "string" },
+        "likes": { "type": "number" },
+        "comments": { "type": "number" },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["userId", "likes", "comments", "createdAt"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "A direct message chat between users.",
+      "type": "object",
+      "properties": {
+        "participants": { "type": "array", "items": { "type": "string" } },
+        "lastMessage": { "type": "string" },
+        "lastMessageTime": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["participants", "updatedAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A message within a chat.",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "text": { "type": "string" },
+        "image": { "type": "string" },
+        "video": { "type": "string" },
+        "music": { "type": "string" },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["chatId", "senderId", "createdAt"]
+    },
+    "Community": {
+      "title": "Community",
+      "description": "A community or group.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "username": { "type": "string" },
+        "description": { "type": "string" },
+        "coverImage": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "membersCount": { "type": "number" },
+        "isAdmin": { "type": "boolean" },
+        "isVerified": { "type": "boolean" },
+        "isMuted": { "type": "boolean" },
+        "isBanned": { "type": "boolean" },
+        "isFrozen": { "type": "boolean" },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["name", "username", "ownerId", "membersCount", "createdAt"]
+    },
+    "CommunityMember": {
+      "title": "CommunityMember",
+      "description": "A member of a community.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "communityId": { "type": "string" },
+        "role": { "type": "string" },
+        "joinedAt": { "type": "timestamp" }
+      },
+      "required": ["userId", "communityId", "role", "joinedAt"]
+    },
+    "Friend": {
+      "title": "Friend",
+      "description": "A friendship or friend request.",
+      "type": "object",
+      "properties": {
+        "user1": { "type": "string" },
+        "user2": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "accepted"] },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["user1", "user2", "status", "createdAt"]
     }
   },
   "firestore": {
-    "/users/{userId}": {
-      "schema": {
-        "$ref": "#/entities/User"
-      },
-      "description": "Stores user profiles."
-    }
+    "/users/{userId}": { "schema": { "$ref": "#/entities/User" }, "description": "Stores user profiles." },
+    "/posts/{postId}": { "schema": { "$ref": "#/entities/Post" }, "description": "Stores posts." },
+    "/chats/{chatId}": { "schema": { "$ref": "#/entities/Chat" }, "description": "Stores chats." },
+    "/chats/{chatId}/messages/{messageId}": { "schema": { "$ref": "#/entities/Message" }, "description": "Stores messages in a chat." },
+    "/communities/{communityId}": { "schema": { "$ref": "#/entities/Community" }, "description": "Stores communities." },
+    "/communityMembers/{memberId}": { "schema": { "$ref": "#/entities/CommunityMember" }, "description": "Stores community memberships." },
+    "/friends/{friendId}": { "schema": { "$ref": "#/entities/Friend" }, "description": "Stores friendships." }
   }
 }
