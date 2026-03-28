@@ -1,2294 +1,2887 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { 
-  Settings, MapPin, Calendar, Heart, MessageCircle, Sparkles, Camera, Pencil, X, LogOut, 
-  Github, Twitter, Instagram, Globe, Trash2, Image as ImageIcon, Send, Home, Users, User, 
-  Menu, Search, UserPlus, UserCheck, Clock, Shield, BadgeCheck, Plus, UsersRound, Video, Music, ChevronLeft, UserMinus, ArrowLeft, ImagePlus, Share2,
-  Zap, MessageSquare, ChevronRight, Save, Award
-} from 'lucide-react';
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { Home, Users, MessageCircle, LayoutGrid, User, Aperture, Settings, LogOut, Image as ImageIcon, Music, ChevronLeft, Camera, Plus, Heart, Share2, MoreHorizontal, Send, Pin, Search, Bell, X, Eye, EyeOff, UserPlus, UserMinus, Check, CheckCheck, Paperclip, Smile, Mic, MoreVertical, Copy, Reply, Trash2, Play, Newspaper, Coffee, Shield, Lock, Globe, Hash, UsersRound, ImagePlus, ShieldAlert, Activity, FileText, Award, CheckCircle, Ban, Eraser, Crown, Gem, Medal, MessageSquare, Edit } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { auth, db } from './firebase';
-import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, collection, query, orderBy, addDoc, updateDoc, deleteDoc, increment, where, getDocs } from 'firebase/firestore';
+import { Toaster, toast } from 'sonner';
+import { auth, db, googleProvider } from './firebase';
+import { signInWithPopup, onAuthStateChanged, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, signInAnonymously } from 'firebase/auth';
+import { doc, getDoc, setDoc, serverTimestamp, collection, addDoc, onSnapshot, query, orderBy, updateDoc } from 'firebase/firestore';
+import { handleFirestoreError, OperationType } from './lib/firebase-utils';
+import { Logo } from './components/Logo';
 
-// --- Error Handling ---
-enum OperationType { CREATE = 'create', UPDATE = 'update', DELETE = 'delete', LIST = 'list', GET = 'get', WRITE = 'write' }
-interface FirestoreErrorInfo {
-  error: string; operationType: OperationType; path: string | null;
-  authInfo: { userId: string | undefined; email: string | null | undefined; emailVerified: boolean | undefined; isAnonymous: boolean | undefined; tenantId: string | null | undefined; providerInfo: any[]; }
-}
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid, email: auth.currentUser?.email, emailVerified: auth.currentUser?.emailVerified, isAnonymous: auth.currentUser?.isAnonymous, tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(p => ({ providerId: p.providerId, displayName: p.displayName, email: p.email, photoUrl: p.photoURL })) || []
-    },
-    operationType, path
+const Badge = ({ type, size = 16 }: { type: 'verified' | 'admin' | 'creator', size?: number }) => {
+  const badges = {
+    verified: { icon: CheckCircle, color: 'text-blue-500', label: 'Верифицирован' },
+    admin: { icon: ShieldAlert, color: 'text-red-500', label: 'Администрация' },
+    creator: { icon: Crown, color: 'text-yellow-500', label: 'Создатель проекта' },
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  // In a real app, we might show a toast here.
-}
 
-type TabType = 'feed' | 'friends' | 'messages' | 'communities' | 'profile';
+  const badge = badges[type];
+  if (!badge) return null;
+  const Icon = badge.icon;
+
+  return (
+    <div 
+      className={`inline-flex items-center justify-center ${badge.color} cursor-help drop-shadow-[0_0_2px_rgba(0,0,0,0.1)] relative overflow-hidden`} 
+      title={badge.label}
+    >
+      <Icon 
+        size={size} 
+        fill="currentColor" 
+        fillOpacity={0.2} 
+      />
+    </div>
+  );
+};
+
+const NAV_ITEMS = [
+  { id: 'home', label: 'Лента', icon: Home },
+  { id: 'friends', label: 'Друзья', icon: Users },
+  { id: 'messages', label: 'Сообщения', icon: MessageCircle },
+  { id: 'communities', label: 'Хаб', icon: LayoutGrid },
+  { id: 'profile', label: 'Профиль', icon: User },
+];
+
+const DEFAULT_AVATAR = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' fill='%23e2e8f0'/%3E%3Ccircle cx='12' cy='9' r='4' fill='%2394a3b8'/%3E%3Cpath d='M20 21a8 8 0 0 0-16 0' fill='%2394a3b8'/%3E%3C/svg%3E";
+const DEFAULT_COVER = "https://picsum.photos/seed/vkcover/1200/400";
+
+// Оптимизированный компонент друга
+const FriendItem = React.memo(({ friend, onClick }: { friend: any, onClick: () => void }) => (
+  <motion.div
+    initial={{ opacity: 0, scale: 0.95 }}
+    animate={{ opacity: 1, scale: 1 }}
+    whileHover={{ scale: 1.01 }}
+    onClick={onClick}
+    className="bg-white border border-black/5 rounded-3xl p-4 flex items-center gap-4 shadow-sm hover:shadow-md transition-all cursor-pointer"
+  >
+    <div className="w-14 h-14 rounded-2xl overflow-hidden shrink-0 relative shadow-sm">
+      <img src={friend.avatar} alt={friend.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+      {friend.isOnline && <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-white" />}
+    </div>
+    <div className="flex-1">
+      <h4 className="text-base font-bold text-vk-text flex items-center gap-1">
+        {friend.name}
+        {friend.isVerified && <Badge type="verified" size={14} />}
+      </h4>
+      <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-wider">{friend.isOnline ? 'Online' : friend.lastSeen}</p>
+    </div>
+    <button 
+      className="w-10 h-10 rounded-full bg-[#120a8f]/5 text-[#120a8f] flex items-center justify-center hover:bg-[#120a8f]/10 transition-colors" 
+      onClick={(e) => { 
+        e.stopPropagation(); 
+        onClick(); // In this case, onClick is setViewingProfile, but we might want to open chat directly
+      }}
+    >
+      <MessageCircle size={20} />
+    </button>
+  </motion.div>
+));
+
+// Оптимизированный компонент сообщества
+const CommunityItem = React.memo(({ community, onClick }: { community: any, onClick: () => void }) => (
+  <motion.div
+    initial={{ opacity: 0, scale: 0.95 }}
+    animate={{ opacity: 1, scale: 1 }}
+    whileHover={{ scale: 1.01 }}
+    onClick={onClick}
+    className="bg-white border border-black/5 rounded-3xl p-4 flex items-center gap-4 shadow-sm hover:shadow-md transition-all cursor-pointer"
+  >
+    <div className="w-14 h-14 rounded-2xl overflow-hidden shrink-0 relative shadow-sm">
+      <img src={community.avatar} alt={community.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+    </div>
+    <div className="flex-1 min-w-0">
+      <h4 className="text-base font-bold text-vk-text truncate">{community.name}</h4>
+      <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-wider">{community.members} • {community.category}</p>
+    </div>
+    <button className="px-4 py-1.5 bg-[#120a8f]/5 text-[#120a8f] hover:bg-[#120a8f]/10 rounded-xl text-xs font-bold transition-colors">
+      Зайти
+    </button>
+  </motion.div>
+));
+
+// Оптимизированный компонент чата
+const ChatItem = React.memo(({ chat, onClick }: { chat: any, onClick: () => void }) => (
+  <motion.div 
+    initial={{ opacity: 0, x: -20 }}
+    animate={{ opacity: 1, x: 0 }}
+    whileHover={{ scale: 1.01 }}
+    onClick={onClick}
+    className="bg-white border border-black/5 rounded-3xl p-4 flex items-center gap-4 shadow-sm hover:shadow-md transition-all cursor-pointer"
+  >
+    <div className="w-14 h-14 rounded-2xl overflow-hidden shrink-0 relative shadow-sm">
+      <img src={chat.avatar} alt={chat.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+      {chat.isOnline && <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-white" />}
+    </div>
+    <div className="flex-1 overflow-hidden">
+      <div className="flex justify-between items-center mb-1">
+        <h4 className="text-base font-bold text-vk-text truncate flex items-center gap-1">
+          {chat.name}
+          {chat.isVerified && <Badge type="verified" size={14} />}
+        </h4>
+        <span className="text-[10px] font-bold text-vk-text-muted uppercase tracking-wider shrink-0">{chat.time}</span>
+      </div>
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-vk-text-muted truncate pr-4">{chat.lastMessage}</p>
+        {chat.unread && (
+          <div className="w-5 h-5 bg-blue-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center shadow-sm shadow-[#120a8f]/20">
+            {chat.unread}
+          </div>
+        )}
+      </div>
+    </div>
+  </motion.div>
+));
+
+// Оптимизированный компонент поста
+const PostItem = React.memo(({ post, onClick }: { post: any, onClick: () => void }) => (
+  <motion.div 
+    initial={{ opacity: 0, y: 20 }} 
+    animate={{ opacity: 1, y: 0 }} 
+    className="bg-white border-y border-black/5 sm:border sm:rounded-3xl shadow-sm cursor-pointer hover:shadow-md transition-all mb-3 overflow-hidden" 
+    onClick={onClick}
+  >
+    <div className="p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl overflow-hidden shadow-sm">
+            <img src={post.author.avatar} alt="Avatar" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+          </div>
+          <div>
+            <h4 className="text-sm font-bold text-vk-text flex items-center gap-1">
+              {post.author.name}
+              {post.author.isVerified && <Badge type="verified" size={14} />}
+            </h4>
+            <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-wider">{post.time}</p>
+          </div>
+        </div>
+        <button className="text-vk-text-muted hover:text-vk-text p-1" onClick={(e) => e.stopPropagation()}>
+          <MoreHorizontal size={20} />
+        </button>
+      </div>
+      
+      <p className="text-vk-text text-sm leading-relaxed mb-3">{post.text}</p>
+      
+      {post.image && (
+        <div className="rounded-2xl overflow-hidden mb-3 border border-black/5">
+          <img src={post.image} alt="Post" className="w-full h-auto object-cover max-h-[400px]" referrerPolicy="no-referrer" />
+        </div>
+      )}
+      
+      <div className="flex items-center justify-between pt-3 border-t border-black/5">
+        <div className="flex items-center gap-4">
+          <button className="flex items-center gap-1.5 text-vk-text-muted hover:text-red-500 transition-colors group">
+            <div className="p-1.5 rounded-full group-hover:bg-red-50 transition-colors">
+              <Heart size={20} />
+            </div>
+            <span className="text-xs font-bold">{post.likes}</span>
+          </button>
+          <button className="flex items-center gap-1.5 text-vk-text-muted hover:text-vk-accent transition-colors group">
+            <div className="p-1.5 rounded-full group-hover:bg-vk-accent/5 transition-colors">
+              <MessageCircle size={20} />
+            </div>
+            <span className="text-xs font-bold">{post.comments}</span>
+          </button>
+          <button className="flex items-center gap-1.5 text-vk-text-muted hover:text-blue-500 transition-colors group">
+            <div className="p-1.5 rounded-full group-hover:bg-blue-50 transition-colors">
+              <Share2 size={20} />
+            </div>
+            <span className="text-xs font-bold">{post.shares}</span>
+          </button>
+        </div>
+        <div className="flex items-center gap-1 text-vk-text-muted">
+          <Eye size={14} />
+          <span className="text-[10px] font-bold">{(post.likes * 12).toLocaleString()}</span>
+        </div>
+      </div>
+    </div>
+  </motion.div>
+));
+
+const MOCK_STORIES = [
+  { id: 1, name: 'Ваш', avatar: DEFAULT_AVATAR, isAdd: true, hasUnseen: false },
+];
+
+import { VIRTUAL_CHATS, VIRTUAL_USERS } from './mockDataGenerator';
+
+const MOCK_COMMENTS: any[] = [];
+
+const MOCK_FRIENDS: any[] = [];
+
+const MOCK_INCOMING_REQUESTS: any[] = [];
+
+const MOCK_OUTGOING_REQUESTS: any[] = [];
+
+const MOCK_RECOMMENDED: any[] = [];
+
+const MOCK_COMMUNITIES: any[] = [];
+
+const MOCK_CHANNELS: any[] = [];
+
+const MOCK_COMMUNITY_MEMBERS: any[] = [];
+
+const MOCK_CHAT_MESSAGES: any[] = [];
+
+const ADMIN_TABS = [
+  { id: 'dashboard', label: 'Дашборд', icon: Activity },
+  { id: 'users', label: 'Пользователи', icon: Users },
+  { id: 'communities', label: 'Сообщества', icon: UsersRound },
+  { id: 'chats', label: 'Чаты', icon: MessageSquare },
+  { id: 'posts', label: 'Посты', icon: FileText },
+  { id: 'settings', label: 'Настройки', icon: Settings },
+];
 
 export default function App() {
-  const [user, setUser] = useState<FirebaseUser | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
-  const [loginError, setLoginError] = useState<string | null>(null);
-  const [currentUserData, setCurrentUserData] = useState<any>(null);
-  
-  // Navigation
-  const [activeTab, setActiveTab] = useState<TabType>('feed');
-  const [feedTab, setFeedTab] = useState<'friends' | 'global'>('friends');
-  const [friendsTab, setFriendsTab] = useState<'all' | 'online' | 'requests'>('all');
-  const [profileViewUserId, setProfileViewUserId] = useState<string | null>(null);
-  const [activeCommunityId, setActiveCommunityId] = useState<string | null>(null);
-  const [communityTab, setCommunityTab] = useState<'posts' | 'members' | 'settings'>('posts');
-  const [isNavOpen, setIsNavOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const isAdmin = currentUser?.isAdmin || false;
+  const isCreator = currentUser?.isCreator || false;
+  const isVerified = currentUser?.isVerified || false;
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authName, setAuthName] = useState('');
+  const [isLoginMode, setIsLoginMode] = useState(true);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [isIntroPlaying, setIsIntroPlaying] = useState(true);
+  const [activeTab, setActiveTab] = useState('home');
+  const [hubView, setHubView] = useState<'communities' | 'profiles'>('communities');
+  const [isCreatingHubProfile, setIsCreatingHubProfile] = useState(false);
+  const [hubName, setHubName] = useState('');
+  const [hubSpecialization, setHubSpecialization] = useState('');
+  const [hubAbout, setHubAbout] = useState('');
+  const [hubInterests, setHubInterests] = useState('');
+  const [hubPhoto, setHubPhoto] = useState<string | null>(null);
+  const [hubProfiles, setHubProfiles] = useState<any[]>([]);
+  const [hubSearch, setHubSearch] = useState('');
 
-  // Global Data
-  const [allUsers, setAllUsers] = useState<any[]>([]);
-  const [posts, setPosts] = useState<any[]>([]);
-  const [friends, setFriends] = useState<any[]>([]);
-  const [chats, setChats] = useState<any[]>([]);
-  const [communities, setCommunities] = useState<any[]>([]);
-  const [follows, setFollows] = useState<any[]>([]);
-
-  // Feed State
-  const [newPostText, setNewPostText] = useState('');
-  const [newPostImage, setNewPostImage] = useState('');
-  const [isPosting, setIsPosting] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Friends State
-  const [friendSearch, setFriendSearch] = useState('');
-
-  // Messages State
-  const [activeChatId, setActiveChatId] = useState<string | null>(null);
-  const [chatMessages, setChatMessages] = useState<any[]>([]);
-  const [newMessageText, setNewMessageText] = useState('');
-  const [messageSearch, setMessageSearch] = useState('');
-
-  // Communities State
-  const [isCreateCommunityModalOpen, setIsCreateCommunityModalOpen] = useState(false);
-  const [newCommunityName, setNewCommunityName] = useState('');
-  const [newCommunityUsername, setNewCommunityUsername] = useState('');
-  const [newCommunityDesc, setNewCommunityDesc] = useState('');
-
-  // Profile State
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ name: '', username: '', location: '', status: '', github: '', twitter: '', instagram: '', website: '' });
-  const [isSaving, setIsSaving] = useState(false);
-  const [profileError, setProfileError] = useState<string | null>(null);
-
-  // Admin Panel State
-  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
-  const [adminTab, setAdminTab] = useState<'users' | 'communities'>('users');
-
-  // Comment Modal State
-  const [isCommentModalOpen, setIsCommentModalOpen] = useState(false);
-  const [commentingPostId, setCommentingPostId] = useState<string | null>(null);
-  const [newCommentText, setNewCommentText] = useState('');
-  const [isCommenting, setIsCommenting] = useState(false);
-
-  const viewingUserData = useMemo(() => {
-    if (!profileViewUserId) return currentUserData;
-    return allUsers.find(u => u.id === profileViewUserId);
-  }, [profileViewUserId, currentUserData, allUsers]);
-
-  const activeCommunity = useMemo(() => {
-    if (!activeCommunityId) return null;
-    return communities.find(c => c.id === activeCommunityId);
-  }, [activeCommunityId, communities]);
-
-  // --- Auth & Presence ---
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-      setIsAuthReady(true);
-      if (currentUser) {
-        // Update online status
-        const userRef = doc(db, 'users', currentUser.uid);
+    if (!isAuthReady || !currentUser) return;
+
+    const q = query(collection(db, 'hub_profiles'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const profiles = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setHubProfiles(profiles);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'hub_profiles');
+    });
+    return () => unsubscribe();
+  }, [isAuthReady, currentUser]);
+
+  const handleCreateHubProfile = async () => {
+    if (!currentUser || !hubName.trim()) return;
+    
+    try {
+      await setDoc(doc(db, 'hub_profiles', currentUser.uid), {
+        uid: currentUser.uid,
+        hubName,
+        specialization: hubSpecialization,
+        about: hubAbout,
+        interests: hubInterests.split(',').map(i => i.trim()).filter(i => i),
+        photoURL: hubPhoto || currentUser.photoURL || DEFAULT_AVATAR,
+        createdAt: new Date().toISOString()
+      });
+      toast.success('Профиль хаба создан!');
+      setIsCreatingHubProfile(false);
+      // Reset fields
+      setHubName('');
+      setHubSpecialization('');
+      setHubAbout('');
+      setHubInterests('');
+      setHubPhoto(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'hub_profiles');
+    }
+  };
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
         try {
-          await updateDoc(userRef, { isOnline: true, lastSeen: serverTimestamp() });
-        } catch (e) { /* might fail if user doc doesn't exist yet */ }
+          const userDocRef = doc(db, 'users', user.uid);
+          const userDoc = await getDoc(userDocRef);
+          
+          if (!userDoc.exists()) {
+            // Create user profile
+            const isGlobalAdmin = user.email === 'alexeivasilev270819942@gmail.com';
+            const newUserData = {
+              uid: user.uid,
+              username: user.email?.split('@')[0] || `user_${user.uid.substring(0, 5)}`,
+              displayName: user.displayName || 'Пользователь',
+              email: user.email,
+              photoURL: user.photoURL || DEFAULT_AVATAR,
+              isVerified: isGlobalAdmin,
+              isAdmin: isGlobalAdmin,
+              isCreator: isGlobalAdmin,
+              createdAt: serverTimestamp()
+            };
+            try {
+              await setDoc(userDocRef, newUserData);
+              setCurrentUser(newUserData);
+            } catch (error) {
+              handleFirestoreError(error, OperationType.CREATE, `users/${user.uid}`);
+            }
+          } else {
+            const data = userDoc.data();
+            const isGlobalAdmin = user.email === 'alexeivasilev270819942@gmail.com';
+            
+            // Auto-upgrade global admin if needed
+            if (isGlobalAdmin && (!data.isAdmin || !data.isVerified || !data.isCreator)) {
+              const updatedData = { 
+                ...data, 
+                isAdmin: true, 
+                isVerified: true, 
+                isCreator: true 
+              };
+              try {
+                await updateDoc(userDocRef, updatedData);
+                setCurrentUser(updatedData);
+                toast.success('Права администратора подтверждены');
+              } catch (error) {
+                console.error("Failed to auto-upgrade admin:", error);
+                setCurrentUser(data);
+              }
+            } else {
+              setCurrentUser(data);
+            }
+          }
+        } catch (error) {
+          handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+        }
+      } else {
+        setCurrentUser(null);
       }
+      setIsAuthReady(true);
     });
     return () => unsubscribe();
   }, []);
-
-  // Handle beforeunload for offline status
+  
   useEffect(() => {
-    const handleUnload = () => {
-      if (user) {
-        // Note: this is a best-effort approach. Realtime DB is better for presence.
-        const userRef = doc(db, 'users', user.uid);
-        updateDoc(userRef, { isOnline: false, lastSeen: serverTimestamp() }).catch(() => {});
-      }
-    };
-    window.addEventListener('beforeunload', handleUnload);
-    return () => window.removeEventListener('beforeunload', handleUnload);
-  }, [user]);
+    if (!isAuthReady || !currentUser) return;
 
-  // --- Data Fetching ---
-  useEffect(() => {
-    if (!isAuthReady || !user) return;
+    const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedPosts = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        author: {
+          name: doc.data().authorName,
+          avatar: doc.data().authorPhoto,
+          isVerified: doc.data().authorIsVerified
+        },
+        time: new Date(doc.data().createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }));
+      setPosts(fetchedPosts);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'posts');
+    });
 
-    // Current User Profile
-    const userUnsub = onSnapshot(doc(db, 'users', user.uid), (docSnap) => {
-      if (docSnap.exists()) {
-        setCurrentUserData(docSnap.data());
-      } else {
-        const initialData = {
-          uid: user.uid,
-          name: user.displayName || 'New User',
-          username: user.email?.split('@')[0] || 'user',
-          location: '', status: 'Привет! Я использую Jagooars 🐆',
-          profileImage: user.photoURL || 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jaguar',
-          coverImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop',
-          isOnline: true, lastSeen: serverTimestamp(),
-          isAdmin: false, isVerified: false,
-          createdAt: serverTimestamp()
-        };
-        setDoc(doc(db, 'users', user.uid), initialData).catch(e => handleFirestoreError(e, OperationType.CREATE, `users/${user.uid}`));
-      }
-    }, e => handleFirestoreError(e, OperationType.GET, `users/${user.uid}`));
+    return () => unsubscribe();
+  }, [isAuthReady, currentUser]);
 
-    // All Users (for search/friends)
-    const usersUnsub = onSnapshot(collection(db, 'users'), (snap) => {
-      setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, e => handleFirestoreError(e, OperationType.LIST, 'users'));
+  // Состояния для профиля
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [viewingProfile, setViewingProfile] = useState<{ id: string, name: string, avatar: string, isFriend?: boolean, isOnline?: boolean, lastSeen?: string, about?: string, isAI?: boolean, isVerified?: boolean, isAdmin?: boolean, isCreator?: boolean, specialization?: string, interests?: string[] } | null>(null);
+  const [selectedPost, setSelectedPost] = useState<any>(null);
+  const [newPostText, setNewPostText] = useState('');
+  const [newPostImage, setNewPostImage] = useState<string | null>(null);
+  const postImageInputRef = useRef<HTMLInputElement>(null);
+  const hubPhotoInputRef = useRef<HTMLInputElement>(null);
+  const communityAvatarInputRef = useRef<HTMLInputElement>(null);
+  const communityCoverInputRef = useRef<HTMLInputElement>(null);
 
-    // Posts
-    const postsUnsub = onSnapshot(query(collection(db, 'posts'), orderBy('createdAt', 'desc')), (snap) => {
-      setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, e => handleFirestoreError(e, OperationType.LIST, 'posts'));
-
-    // Friends
-    const friendsUnsub = onSnapshot(collection(db, 'friends'), (snap) => {
-      setFriends(snap.docs.map(d => ({ id: d.id, ...d.data() } as any)).filter(f => f.user1 === user.uid || f.user2 === user.uid));
-    }, e => handleFirestoreError(e, OperationType.LIST, 'friends'));
-
-    // Chats
-    const chatsUnsub = onSnapshot(query(collection(db, 'chats'), where('participants', 'array-contains', user.uid)), (snap) => {
-      const fetchedChats = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      fetchedChats.sort((a: any, b: any) => {
-        const timeA = a.updatedAt?.toMillis() || 0;
-        const timeB = b.updatedAt?.toMillis() || 0;
-        return timeB - timeA;
-      });
-      setChats(fetchedChats);
-    }, e => handleFirestoreError(e, OperationType.LIST, 'chats'));
-
-    // Communities
-    const commUnsub = onSnapshot(query(collection(db, 'communities'), orderBy('createdAt', 'desc')), (snap) => {
-      setCommunities(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, e => handleFirestoreError(e, OperationType.LIST, 'communities'));
-
-    // Follows
-    const followsUnsub = onSnapshot(collection(db, 'follows'), (snap) => {
-      setFollows(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, e => handleFirestoreError(e, OperationType.LIST, 'follows'));
-
-    return () => { userUnsub(); usersUnsub(); postsUnsub(); friendsUnsub(); chatsUnsub(); commUnsub(); followsUnsub(); };
-  }, [user, isAuthReady]);
-
-  // Fetch Messages for Active Chat
-  useEffect(() => {
-    if (!activeChatId) return;
-    const q = query(collection(db, `chats/${activeChatId}/messages`), orderBy('createdAt', 'asc'));
-    const unsub = onSnapshot(q, (snap) => {
-      setChatMessages(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, e => handleFirestoreError(e, OperationType.LIST, `chats/${activeChatId}/messages`));
-    return () => unsub();
-  }, [activeChatId]);
-
-  // --- Actions ---
-  const handleLogin = async () => {
-    setLoginError(null);
-    try {
-      await signInWithPopup(auth, new GoogleAuthProvider());
-    } catch (error: any) {
-      setLoginError(error.message || "Произошла ошибка при авторизации.");
-    }
-  };
-
-  const handleLogout = async () => {
-    if (user) {
-      await updateDoc(doc(db, 'users', user.uid), { isOnline: false, lastSeen: serverTimestamp() }).catch(()=>{});
-    }
-    await signOut(auth);
-  };
-
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'profile' | 'cover' | 'post') => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>, callback: (base64: string) => void) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > 1024 * 1024) { // 1MB limit for base64 in Firestore
+        toast.error('Файл слишком большой (макс. 1МБ)');
+        return;
+      }
       const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64String = reader.result as string;
-        if (type === 'post') { setNewPostImage(base64String); return; }
-        if (!user) return;
-        try {
-          await updateDoc(doc(db, 'users', user.uid), { [type === 'profile' ? 'profileImage' : 'coverImage']: base64String });
-        } catch (error) { handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`); }
+      reader.onloadend = () => {
+        callback(reader.result as string);
       };
       reader.readAsDataURL(file);
     }
   };
 
-  const handleCreatePost = async (communityId?: string) => {
-    if (!user || (!newPostText.trim() && !newPostImage) || !currentUserData || currentUserData.isFrozen || currentUserData.isMuted) return;
-    setIsPosting(true);
+  // Состояния для друзей
+  const [friendsTab, setFriendsTab] = useState<'all' | 'requests' | 'add'>('all');
+  const [friendsSearch, setFriendsSearch] = useState('');
+  const [addFriendSearch, setAddFriendSearch] = useState('');
+
+  // Состояния для чата
+  const [activeChat, setActiveChat] = useState<any>(null);
+  const [chatMessages, setChatMessages] = useState(MOCK_CHAT_MESSAGES);
+  const [virtualChats, setVirtualChats] = useState(VIRTUAL_CHATS);
+  const [posts, setPosts] = useState<any[]>([]);
+  const [geminiMessages, setGeminiMessages] = useState<any[]>([
+    { id: 1, type: 'text', text: 'Привет! Я Gemini AI. Чем могу помочь?', sender: 'other', time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), status: 'read' }
+  ]);
+  const [isGeminiTyping, setIsGeminiTyping] = useState(false);
+
+  const [newChatMessage, setNewChatMessage] = useState('');
+  const [selectedMessageId, setSelectedMessageId] = useState<number | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Состояния для сообществ
+  const [communitiesSearch, setCommunitiesSearch] = useState('');
+  const [activeCommunity, setActiveCommunity] = useState<any>(null);
+  const [activeChannel, setActiveChannel] = useState<any>(MOCK_CHANNELS[0]);
+  const [communityView, setCommunityView] = useState<'chat' | 'members'>('chat');
+  const [isCreatingCommunity, setIsCreatingCommunity] = useState(false);
+  const [communityName, setCommunityName] = useState('');
+  const [communityDescription, setCommunityDescription] = useState('');
+  const [communityAvatar, setCommunityAvatar] = useState<string | null>(null);
+  const [communityCover, setCommunityCover] = useState<string | null>(null);
+  const [isCommunitySettingsOpen, setIsCommunitySettingsOpen] = useState(false);
+
+  const handleCreateCommunity = async () => {
+    if (!currentUser || !communityName.trim()) return;
     try {
-      await addDoc(collection(db, 'posts'), {
-        userId: user.uid, 
-        authorName: currentUserData.name, 
-        authorUsername: currentUserData.username,
-        authorImage: currentUserData.profileImage, 
-        text: newPostText.trim(), 
-        image: newPostImage,
-        likes: 0, 
-        comments: 0, 
-        createdAt: serverTimestamp(),
-        communityId: communityId || null
-      });
-      setNewPostText(''); 
-      setNewPostImage('');
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    } catch (error) { handleFirestoreError(error, OperationType.CREATE, 'posts'); } 
-    finally { setIsPosting(false); }
-  };
-
-  const handleLikePost = async (postId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!user || currentUserData?.isFrozen) return;
-    const post = posts.find(p => p.id === postId);
-    if (!post) return;
-    
-    const isLiked = post.likes?.includes(user.uid);
-    const newLikes = isLiked 
-      ? post.likes.filter((id: string) => id !== user.uid)
-      : [...(post.likes || []), user.uid];
-
-    try { 
-      await updateDoc(doc(db, 'posts', postId), { likes: newLikes }); 
-    } catch (error) { 
-      handleFirestoreError(error, OperationType.UPDATE, `posts/${postId}`); 
-    }
-  };
-
-  const handleCommentPost = async () => {
-    if (!user || !commentingPostId || !newCommentText.trim() || currentUserData?.isFrozen) return;
-    setIsCommenting(true);
-    try {
-      const post = posts.find(p => p.id === commentingPostId);
-      if (!post) return;
-
-      const newComment = {
-        id: Math.random().toString(36).substr(2, 9),
-        userId: user.uid,
-        userName: currentUserData.name,
-        userAvatar: currentUserData.profileImage,
-        text: newCommentText.trim(),
+      await addDoc(collection(db, 'communities'), {
+        name: communityName,
+        description: communityDescription,
+        avatar: communityAvatar || DEFAULT_AVATAR,
+        cover: communityCover || '',
+        creatorId: currentUser.uid,
+        membersCount: 1,
+        isVerified: false,
         createdAt: new Date().toISOString()
-      };
-
-      const newComments = [...(post.comments || []), newComment];
-      await updateDoc(doc(db, 'posts', commentingPostId), { comments: newComments });
-      setNewCommentText('');
-      setIsCommentModalOpen(false);
-      setCommentingPostId(null);
+      });
+      toast.success('Сообщество создано!');
+      setIsCreatingCommunity(false);
+      setCommunityName('');
+      setCommunityDescription('');
+      setCommunityAvatar(null);
+      setCommunityCover(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `posts/${commentingPostId}`);
-    } finally {
-      setIsCommenting(false);
+      handleFirestoreError(error, OperationType.CREATE, 'communities');
     }
   };
 
-  const handleDeletePost = async (postId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!user || currentUserData?.isFrozen) return;
-    try { await deleteDoc(doc(db, 'posts', postId)); } 
-    catch (error) { handleFirestoreError(error, OperationType.DELETE, `posts/${postId}`); }
-  };
+  // Состояния админ-панели
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
+  const [adminTab, setAdminTab] = useState('dashboard');
 
-  const checkUsernameUnique = async (username: string, currentId?: string) => {
-    const cleanUsername = username.replace(/^@/, '').trim();
-    if (!cleanUsername) return false;
-    
-    // Check users
-    const userQ = query(collection(db, 'users'), where('username', '==', cleanUsername));
-    const userSnap = await getDocs(userQ);
-    const isUsedByUser = userSnap.docs.some(d => d.id !== currentId);
-    
-    // Check communities
-    const commQ = query(collection(db, 'communities'), where('username', '==', cleanUsername));
-    const commSnap = await getDocs(commQ);
-    const isUsedByComm = commSnap.docs.some(d => d.id !== currentId);
-    
-    return !(isUsedByUser || isUsedByComm);
-  };
+  // Таймер онлайна удален
 
-  const handleSaveProfile = async () => {
-    if (!user || currentUserData?.isFrozen) return;
-    setProfileError(null);
-    setIsSaving(true);
-    try {
-      const cleanUsername = editForm.username.replace(/^@/, '').trim();
-      const isUnique = await checkUsernameUnique(cleanUsername, user.uid);
-      if (!isUnique) {
-        setProfileError('Этот @id уже занят. Пожалуйста, выберите другой.');
-        setIsSaving(false);
-        return;
-      }
 
-      await updateDoc(doc(db, 'users', user.uid), {
-        name: editForm.name, username: cleanUsername, location: editForm.location, status: editForm.status,
-        github: editForm.github, twitter: editForm.twitter, instagram: editForm.instagram, website: editForm.website,
-      });
-      setIsEditModalOpen(false);
-    } catch (error) { handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`); } 
-    finally { setIsSaving(false); }
-  };
+  // Оптимизация списков для устранения лагов
+  const filteredFriends = useMemo(() => {
+    return [...MOCK_FRIENDS, ...VIRTUAL_USERS]
+      .filter(f => f.name.toLowerCase().includes(friendsSearch.toLowerCase()))
+      .slice(0, 50);
+  }, [friendsSearch]);
 
-  // --- Friends Actions ---
-  const handleAddFriend = async (targetUserId: string) => {
-    if (!user || currentUserData?.isFrozen) return;
-    try {
-      await addDoc(collection(db, 'friends'), {
-        user1: user.uid, user2: targetUserId, status: 'pending', createdAt: serverTimestamp()
-      });
-    } catch (e) { handleFirestoreError(e, OperationType.CREATE, 'friends'); }
-  };
+  const displayPosts = useMemo(() => {
+    return posts.slice(0, 50);
+  }, [posts]);
 
-  const handleAcceptFriend = async (friendId: string) => {
-    if (currentUserData?.isFrozen) return;
-    try { await updateDoc(doc(db, 'friends', friendId), { status: 'accepted' }); } 
-    catch (e) { handleFirestoreError(e, OperationType.UPDATE, `friends/${friendId}`); }
-  };
+  const displayChats = useMemo(() => {
+    return virtualChats.slice(0, 50);
+  }, [virtualChats]);
 
-  const handleRemoveFriend = async (friendId: string) => {
-    if (currentUserData?.isFrozen) return;
-    try { await deleteDoc(doc(db, 'friends', friendId)); } 
-    catch (e) { handleFirestoreError(e, OperationType.DELETE, `friends/${friendId}`); }
-  };
+  const filteredCommunities = useMemo(() => {
+    return MOCK_COMMUNITIES.filter(c => c.name.toLowerCase().includes(communitiesSearch.toLowerCase()));
+  }, [communitiesSearch]);
 
-  // --- Chat Actions ---
-  const handleStartChat = async (targetUserId: string) => {
-    if (!user || currentUserData?.isFrozen) return;
-    // Check if chat exists
-    const existingChat = chats.find(c => c.participants.includes(user.uid) && c.participants.includes(targetUserId));
-    if (existingChat) {
-      setActiveChatId(existingChat.id);
-      setActiveTab('messages');
-      return;
+  useEffect(() => {
+    if (activeChat) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-    try {
-      const chatRef = await addDoc(collection(db, 'chats'), {
-        participants: [user.uid, targetUserId], updatedAt: serverTimestamp(), lastMessage: ''
-      });
-      setActiveChatId(chatRef.id);
-      setActiveTab('messages');
-    } catch (e) { handleFirestoreError(e, OperationType.CREATE, 'chats'); }
-  };
+  }, [chatMessages, geminiMessages, activeChat, isGeminiTyping]);
+
+  // Симуляция активности виртуальных пользователей удалена
 
   const handleSendMessage = async () => {
-    if (!user || !activeChatId || !newMessageText.trim() || currentUserData?.isMuted || currentUserData?.isFrozen) return;
-    try {
-      await addDoc(collection(db, `chats/${activeChatId}/messages`), {
-        chatId: activeChatId, senderId: user.uid, text: newMessageText.trim(), createdAt: serverTimestamp()
-      });
-      await updateDoc(doc(db, 'chats', activeChatId), {
-        lastMessage: newMessageText.trim(), updatedAt: serverTimestamp()
-      });
-      setNewMessageText('');
-    } catch (e) { handleFirestoreError(e, OperationType.CREATE, `chats/${activeChatId}/messages`); }
-  };
-
-  // --- Community Actions ---
-  const handleCreateCommunity = async () => {
-    if (!user || !newCommunityName.trim() || !newCommunityUsername.trim() || currentUserData?.isFrozen || currentUserData?.isMuted) return;
-    try {
-      const cleanUsername = newCommunityUsername.replace(/^@/, '').trim();
-      const isUnique = await checkUsernameUnique(cleanUsername);
-      if (!isUnique) {
-        alert('Этот @id уже занят. Пожалуйста, выберите другой.');
-        return;
+    if (!newChatMessage.trim()) return;
+    const newMsg = {
+      id: Date.now(),
+      type: 'text',
+      text: newChatMessage,
+      sender: 'me',
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      status: 'sent'
+    };
+    
+    if (activeChat?.isAI) {
+      const isGeminiBot = activeChat.id === 'gemini_bot';
+      if (isGeminiBot) {
+        setGeminiMessages(prev => [...prev, newMsg]);
+      } else {
+        setChatMessages(prev => [...prev, newMsg]);
       }
-
-      const commRef = await addDoc(collection(db, 'communities'), {
-        name: newCommunityName.trim(), username: cleanUsername, description: newCommunityDesc.trim(), ownerId: user.uid, followersCount: 1, createdAt: serverTimestamp()
-      });
-      // Automatically follow the community you created
-      await addDoc(collection(db, 'follows'), {
-        followerId: user.uid,
-        followingId: commRef.id,
-        type: 'community',
-        createdAt: serverTimestamp()
-      });
-      setIsCreateCommunityModalOpen(false);
-      setNewCommunityName(''); setNewCommunityUsername(''); setNewCommunityDesc('');
-    } catch (e) { handleFirestoreError(e, OperationType.CREATE, 'communities'); }
-  };
-
-  // --- Admin Actions ---
-  const handleToggleUserStatus = async (userId: string, field: 'isAdmin' | 'isVerified' | 'isMuted' | 'isBanned' | 'isFrozen', currentValue: boolean) => {
-    try {
-      await updateDoc(doc(db, 'users', userId), { [field]: !currentValue });
-    } catch (e) { handleFirestoreError(e, OperationType.UPDATE, `users/${userId}`); }
-  };
-
-  const handleSetUserVip = async (userId: string, vipStatus: string) => {
-    try {
-      await updateDoc(doc(db, 'users', userId), { vipStatus });
-    } catch (e) { handleFirestoreError(e, OperationType.UPDATE, `users/${userId}`); }
-  };
-
-  const handleToggleCommunityStatus = async (commId: string, field: 'isAdmin' | 'isVerified' | 'isMuted' | 'isBanned' | 'isFrozen', currentValue: boolean) => {
-    try {
-      await updateDoc(doc(db, 'communities', commId), { [field]: !currentValue });
-    } catch (e) { handleFirestoreError(e, OperationType.UPDATE, `communities/${commId}`); }
-  };
-
-  const handleFollow = async (followingId: string, type: 'user' | 'community') => {
-    if (!user || currentUserData?.isFrozen) return;
-    try {
-      await addDoc(collection(db, 'follows'), {
-        followerId: user.uid,
-        followingId,
-        type,
-        createdAt: serverTimestamp()
-      });
-      // Increment followers count
-      const ref = doc(db, type === 'user' ? 'users' : 'communities', followingId);
-      await updateDoc(ref, { followersCount: increment(1) });
-    } catch (e) { handleFirestoreError(e, OperationType.CREATE, 'follows'); }
-  };
-
-  const handleUnfollow = async (followingId: string, type: 'user' | 'community') => {
-    if (!user || currentUserData?.isFrozen) return;
-    try {
-      const q = query(collection(db, 'follows'), where('followerId', '==', user.uid), where('followingId', '==', followingId));
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        await deleteDoc(doc(db, 'follows', snap.docs[0].id));
-        // Decrement followers count
-        const ref = doc(db, type === 'user' ? 'users' : 'communities', followingId);
-        await updateDoc(ref, { followersCount: increment(-1) });
+      
+      setNewChatMessage('');
+      setIsGeminiTyping(true);
+      
+      try {
+        const { GoogleGenAI } = await import('@google/genai');
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        
+        // Build history for context
+        const currentMessages = isGeminiBot ? geminiMessages : chatMessages;
+        const history = currentMessages.filter(m => m.type === 'text').map(m => `${m.sender === 'me' ? 'User' : activeChat.name}: ${m.text}`).join('\n');
+        const prompt = `${history}\nUser: ${newChatMessage}\n${activeChat.name}:`;
+        
+        const response = await ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: prompt,
+          config: {
+            systemInstruction: isGeminiBot 
+              ? "You are Gemini AI, a helpful assistant." 
+              : `You are ${activeChat.name}, a user of a social network. Respond naturally as this person. Keep it brief and friendly, like a typical chat message.`,
+          }
+        });
+        
+        const botMsg = {
+          id: Date.now() + 1,
+          type: 'text',
+          text: response.text,
+          sender: 'other',
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          status: 'read'
+        };
+        
+        if (isGeminiBot) {
+          setGeminiMessages(prev => [...prev, botMsg]);
+        } else {
+          setChatMessages(prev => [...prev, botMsg]);
+        }
+      } catch (error) {
+        console.error('AI error:', error);
+        const errorMsg = {
+          id: Date.now() + 1,
+          type: 'text',
+          text: 'Извините, произошла ошибка при обращении к ИИ.',
+          sender: 'other',
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          status: 'read'
+        };
+        if (isGeminiBot) {
+          setGeminiMessages(prev => [...prev, errorMsg]);
+        } else {
+          setChatMessages(prev => [...prev, errorMsg]);
+        }
+      } finally {
+        setIsGeminiTyping(false);
       }
-    } catch (e) { handleFirestoreError(e, OperationType.DELETE, 'follows'); }
+    } else {
+      setChatMessages([...chatMessages, newMsg]);
+      setNewChatMessage('');
+    }
   };
 
-  // --- Render Helpers ---
-  const formatTimeAgo = (timestamp: any) => {
-    if (!timestamp) return '';
-    const date = timestamp.toDate();
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 1) return 'только что';
-    if (diffMins < 60) return `${diffMins} м. назад`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours} ч. назад`;
-    return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+  const handleDeleteMessage = (id: number) => {
+    setChatMessages(chatMessages.filter(m => m.id !== id));
+    setSelectedMessageId(null);
   };
 
-  const getUserStatus = (u: any) => {
-    if (u.isOnline) return <span className="text-green-500 font-semibold text-xs flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>Онлайн</span>;
-    return <span className="text-slate-400 text-xs flex items-center gap-1"><Clock size={12}/>Был(а) {formatTimeAgo(u.lastSeen)}</span>;
+  const handleEmailAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!authEmail || !authPassword) {
+      toast.error('Пожалуйста, заполните все поля');
+      return;
+    }
+    if (!isLoginMode && !authName) {
+      toast.error('Пожалуйста, введите имя');
+      return;
+    }
+
+    setAuthLoading(true);
+    try {
+      if (isLoginMode) {
+        await signInWithEmailAndPassword(auth, authEmail, authPassword);
+        toast.success('Успешный вход!');
+      } else {
+        const userCredential = await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+        await updateProfile(userCredential.user, {
+          displayName: authName
+        });
+        const userDocRef = doc(db, 'users', userCredential.user.uid);
+        const userDoc = await getDoc(userDocRef);
+        if (!userDoc.exists()) {
+          const newUserData = {
+            uid: userCredential.user.uid,
+            username: userCredential.user.email?.split('@')[0] || `user_${userCredential.user.uid.substring(0, 5)}`,
+            displayName: authName,
+            email: userCredential.user.email,
+            photoURL: DEFAULT_AVATAR,
+            isVerified: false,
+            isAdmin: false,
+            isCreator: false,
+            createdAt: serverTimestamp()
+          };
+          await setDoc(userDocRef, newUserData);
+        } else {
+          await setDoc(userDocRef, { displayName: authName }, { merge: true });
+        }
+        toast.success('Регистрация успешна!');
+      }
+    } catch (error: any) {
+      let errorMessage = 'Произошла ошибка';
+      if (error.code === 'auth/email-already-in-use') errorMessage = 'Этот email уже используется';
+      else if (error.code === 'auth/invalid-email') errorMessage = 'Неверный формат email';
+      else if (error.code === 'auth/weak-password') errorMessage = 'Пароль должен быть не менее 6 символов';
+      else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') errorMessage = 'Неверный email или пароль';
+      
+      toast.error(errorMessage);
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
-  const renderVipBadge = (vipStatus: string) => {
-    if (vipStatus === 'gold') return <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-yellow-400/10 text-yellow-400 border border-yellow-400/20 shadow-[0_0_15px_rgba(250,204,21,0.1)] uppercase tracking-tighter ml-1">Gold</span>;
-    if (vipStatus === 'silver') return <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-slate-400/10 text-slate-300 border border-slate-400/20 shadow-[0_0_15px_rgba(148,163,184,0.1)] uppercase tracking-tighter ml-1">Silver</span>;
-    if (vipStatus === 'bronze') return <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-amber-600/10 text-amber-500 border border-amber-600/20 shadow-[0_0_15px_rgba(245,158,11,0.1)] uppercase tracking-tighter ml-1">Bronze</span>;
-    return null;
-  };
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsIntroPlaying(false);
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, []);
 
-  // --- UI Components ---
   if (!isAuthReady) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="bg-gradient-fixed"></div>
-        <div className="animate-pulse flex flex-col items-center">
-          <div className="w-12 h-12 border-t-indigo-600 rounded-full animate-spin mb-4 shadow-lg"></div>
-          <p className="text-slate-300 font-semibold">Загрузка...</p>
-        </div>
+      <div className="min-h-screen bg-vk-bg flex items-center justify-center">
+        <div className="w-12 h-12 border-4 border-vk-accent border-t-transparent rounded-full animate-spin"></div>
       </div>
     );
   }
 
-  if (!user || !currentUserData) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="bg-gradient-fixed"></div>
-        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="glass-panel p-8 rounded-3xl max-w-md w-full text-center">
-          <div className="w-20 h-20 bg-[#25252D] text-indigo-400 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
-            <Settings size={40} />
-          </div>
-          <h1 className="text-3xl font-extrabold text-white mb-2">Jagooars</h1>
-          <p className="text-slate-400 mb-6 font-medium">Войдите, чтобы присоединиться к сообществу.</p>
-          {loginError && (
-            <div className="mb-6 p-4 bg-red-900/30 text-red-600 text-sm rounded-xl text-left">
-              <p className="font-bold mb-1">Ошибка входа:</p><p>{loginError}</p>
+  if (!currentUser) {
+    if (isIntroPlaying) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-screen w-full bg-vk-bg px-6 font-sans relative overflow-hidden">
+          {/* Декоративные элементы фона */}
+          <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-vk-accent/5 rounded-full blur-[100px] pointer-events-none" />
+          <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-500/5 rounded-full blur-[100px] pointer-events-none" />
+
+          {/* Эксклюзивный анимированный логотип */}
+          <motion.div
+            initial={{ opacity: 0, y: -30, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.8, ease: "easeOut", delay: 0.1 }}
+            className="mb-8 flex flex-col items-center z-20"
+          >
+            <Logo size="md" />
+          </motion.div>
+
+          {/* Анимированный телефон */}
+          <motion.div
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -100, opacity: 0 }}
+            transition={{ duration: 0.8, ease: "easeOut" }}
+            className="relative w-[280px] h-[580px] bg-white rounded-[40px] shadow-2xl border-[8px] border-gray-900 overflow-hidden flex flex-col z-10"
+          >
+            {/* Dynamic Island / Notch */}
+            <div className="absolute top-0 inset-x-0 flex justify-center z-20">
+              <div className="w-24 h-6 bg-gray-900 rounded-b-3xl"></div>
             </div>
-          )}
-          <button onClick={handleLogin} className="glass-button-primary w-full py-3.5 font-bold rounded-xl flex items-center justify-center gap-2 text-lg">
-            Войти через Google
-          </button>
-        </motion.div>
-      </div>
-    );
-  }
 
-  if (currentUserData.isBanned) {
+            {/* Chat Header */}
+            <div className="bg-gray-50 pt-10 pb-4 px-4 border-b border-gray-100 flex items-center justify-center shadow-sm z-10">
+              <div className="flex flex-col items-center">
+                <Logo size="xs" showText={false} />
+                <h2 className="text-sm font-bold text-gray-800 mt-1">RDIS Social</h2>
+                <p className="text-[10px] text-green-500 font-medium">online</p>
+              </div>
+            </div>
+
+            {/* Chat Messages */}
+            <div className="flex-1 bg-gray-50/50 p-4 flex flex-col gap-3 overflow-hidden">
+              <motion.div
+                initial={{ opacity: 0, x: -20, scale: 0.8 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                transition={{ delay: 1.5, type: "spring" }}
+                className="self-start bg-white border border-gray-100 text-gray-800 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm shadow-sm max-w-[85%]"
+              >
+                Привет! 👋 Готов присоединиться?
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0, x: 20, scale: 0.8 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                transition={{ delay: 3.0, type: "spring" }}
+                className="self-end bg-vk-accent text-white px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm shadow-md max-w-[85%]"
+              >
+                Да, поехали! 🚀
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0, x: -20, scale: 0.8 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                transition={{ delay: 4.5, type: "spring" }}
+                className="self-start bg-white border border-gray-100 text-gray-800 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm shadow-sm max-w-[85%]"
+              >
+                Отлично! Загружаю...
+                <motion.span
+                  animate={{ opacity: [0, 1, 0] }}
+                  transition={{ repeat: Infinity, duration: 1.5 }}
+                >...</motion.span>
+              </motion.div>
+            </div>
+
+            {/* Chat Input area (fake) */}
+            <div className="bg-white p-4 border-t border-gray-100 flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-400">
+                <Plus size={16} />
+              </div>
+              <div className="flex-1 h-8 bg-gray-100 rounded-full"></div>
+            </div>
+          </motion.div>
+
+          {/* Loading Text below phone */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.5, duration: 0.5 }}
+            className="mt-8 flex flex-col items-center z-10"
+          >
+            <div className="flex items-center gap-2 mt-2 text-vk-text-muted text-sm">
+              <div className="w-4 h-4 border-2 border-vk-accent border-t-transparent rounded-full animate-spin"></div>
+              Подключение...
+            </div>
+          </motion.div>
+        </div>
+      );
+    }
+
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="bg-gradient-fixed"></div>
-        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="glass-panel p-8 rounded-3xl max-w-md w-full text-center">
-          <div className="w-20 h-20 bg-red-900/30 text-red-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
-            <Shield size={40} />
-          </div>
-          <h1 className="text-3xl font-extrabold text-white mb-2">Аккаунт заблокирован</h1>
-          <p className="text-slate-400 mb-6 font-medium">Ваш аккаунт был заблокирован администрацией за нарушение правил сообщества.</p>
-          <button onClick={handleLogout} className="glass-button w-full py-3.5 font-bold rounded-xl flex items-center justify-center gap-2 text-lg">
-            Выйти
-          </button>
+      <div className="flex flex-col items-center justify-center min-h-screen w-full bg-vk-bg px-6 font-sans relative overflow-hidden">
+        <Toaster position="top-center" richColors />
+        
+        {/* Декоративные элементы фона */}
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-vk-accent/5 rounded-full blur-[100px] pointer-events-none" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-500/5 rounded-full blur-[100px] pointer-events-none" />
+
+        {/* Анимированный логотип */}
+        <motion.div
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: "spring", damping: 15, stiffness: 200 }}
+          className="mb-8 z-10"
+        >
+          <Logo size="md" />
+          <p className="text-vk-text-muted text-sm text-center mt-2">
+            {isLoginMode ? 'Войдите, чтобы продолжить' : 'Создайте аккаунт, чтобы продолжить'}
+          </p>
+        </motion.div>
+
+        {/* Форма */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.3, duration: 0.4 }}
+          className="w-full max-w-sm bg-vk-panel p-6 rounded-[32px] border border-vk-border/30 shadow-2xl shadow-black/5 z-10"
+        >
+          <form onSubmit={handleEmailAuth} className="flex flex-col gap-4">
+            {!isLoginMode && (
+              <input
+                type="text"
+                placeholder="Имя пользователя"
+                value={authName}
+                onChange={(e) => setAuthName(e.target.value)}
+                className="w-full bg-vk-bg border border-vk-border rounded-2xl px-4 py-3 text-vk-text placeholder-vk-text-muted focus:outline-none focus:border-vk-accent transition-colors"
+                required
+              />
+            )}
+            <input
+              type="email"
+              placeholder="Email"
+              value={authEmail}
+              onChange={(e) => setAuthEmail(e.target.value)}
+              className="w-full bg-vk-bg border border-vk-border rounded-2xl px-4 py-3 text-vk-text placeholder-vk-text-muted focus:outline-none focus:border-vk-accent transition-colors"
+              required
+            />
+            <input
+              type="password"
+              placeholder="Пароль"
+              value={authPassword}
+              onChange={(e) => setAuthPassword(e.target.value)}
+              className="w-full bg-vk-bg border border-vk-border rounded-2xl px-4 py-3 text-vk-text placeholder-vk-text-muted focus:outline-none focus:border-vk-accent transition-colors"
+              required
+            />
+            <button
+              type="submit"
+              disabled={authLoading}
+              className="w-full bg-vk-accent text-white font-bold rounded-2xl px-4 py-4 shadow-sm hover:bg-vk-accent/90 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {authLoading ? (
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              ) : (
+                isLoginMode ? 'Войти' : 'Зарегистрироваться'
+              )}
+            </button>
+            
+            <div className="flex items-center gap-4 my-2">
+              <div className="flex-1 h-px bg-vk-border"></div>
+              <span className="text-xs text-vk-text-muted font-medium uppercase tracking-wider">или</span>
+              <div className="flex-1 h-px bg-vk-border"></div>
+            </div>
+
+            <button 
+              type="button"
+              onClick={async () => {
+                try {
+                  await signInWithPopup(auth, googleProvider);
+                  toast.success('Успешный вход!');
+                } catch (error: any) {
+                  if (error.code !== 'auth/popup-closed-by-user') {
+                    toast.error('Ошибка входа: ' + error.message);
+                  }
+                }
+              }}
+              className="w-full bg-white text-gray-800 border border-gray-200 font-bold rounded-2xl px-4 py-4 shadow-sm hover:bg-gray-50 active:scale-[0.98] transition-all flex items-center justify-center gap-3"
+            >
+              <svg viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg"><g transform="matrix(1, 0, 0, 1, 27.009001, -39.238998)"><path fill="#4285F4" d="M -3.264 51.509 C -3.264 50.719 -3.334 49.969 -3.454 49.239 L -14.754 49.239 L -14.754 53.749 L -8.284 53.749 C -8.574 55.229 -9.424 56.479 -10.684 57.329 L -10.684 60.329 L -6.824 60.329 C -4.564 58.239 -3.264 55.159 -3.264 51.509 Z"/><path fill="#34A853" d="M -14.754 63.239 C -11.514 63.239 -8.804 62.159 -6.824 60.329 L -10.684 57.329 C -11.764 58.049 -13.134 58.489 -14.754 58.489 C -17.884 58.489 -20.534 56.379 -21.484 53.529 L -25.464 53.529 L -25.464 56.619 C -23.494 60.539 -19.444 63.239 -14.754 63.239 Z"/><path fill="#FBBC05" d="M -21.484 53.529 C -21.734 52.809 -21.864 52.039 -21.864 51.239 C -21.864 50.439 -21.724 49.669 -21.484 48.949 L -21.484 45.859 L -25.464 45.859 C -26.284 47.479 -26.754 49.299 -26.754 51.239 C -26.754 53.179 -26.284 54.999 -25.464 56.619 L -21.484 53.529 Z"/><path fill="#EA4335" d="M -14.754 43.989 C -12.984 43.989 -11.404 44.599 -10.154 45.789 L -6.734 42.369 C -8.804 40.429 -11.514 39.239 -14.754 39.239 C -19.444 39.239 -23.494 41.939 -25.464 45.859 L -21.484 48.949 C -20.534 46.099 -17.884 43.989 -14.754 43.989 Z"/></g></svg>
+              Войти через Google
+            </button>
+
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await signInAnonymously(auth);
+                  toast.success('Успешный анонимный вход!');
+                } catch (error: any) {
+                  toast.error('Ошибка входа: ' + error.message);
+                }
+              }}
+              className="w-full bg-vk-panel text-vk-text border border-vk-border font-bold rounded-2xl px-4 py-4 shadow-sm hover:bg-vk-bg active:scale-[0.98] transition-all flex items-center justify-center gap-3"
+            >
+              <User size={24} className="text-vk-text-muted" />
+              Войти без регистрации
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsLoginMode(!isLoginMode)}
+              className="text-sm text-vk-text-muted hover:text-vk-accent transition-colors mt-2"
+            >
+              {isLoginMode ? 'Нет аккаунта? Зарегистрироваться' : 'Уже есть аккаунт? Войти'}
+            </button>
+          </form>
         </motion.div>
       </div>
     );
   }
-
-  const navItems = [
-    { id: 'feed', label: 'Лента', icon: Home },
-    { id: 'friends', label: 'Друзья', icon: Users },
-    { id: 'messages', label: 'Сообщения', icon: MessageCircle },
-    { id: 'communities', label: 'Сообщества', icon: UsersRound },
-    { id: 'profile', label: 'Профиль', icon: User },
-  ];
 
   return (
-    <div className="min-h-screen text-white font-sans flex justify-center selection:bg-indigo-500/20">
-      <div className="bg-gradient-fixed"></div>
-      <div className="bg-mesh"></div>
-      
-      {/* Animated Floating Navigation Toggle (Mobile) */}
-      <div className="md:hidden fixed bottom-6 right-6 z-[60]">
-        <motion.button 
-          whileTap={{ scale: 0.9 }}
-          onClick={() => setIsNavOpen(!isNavOpen)}
-          className="w-14 h-14 bg-slate-900 text-white rounded-full flex items-center justify-center shadow-2xl shadow-slate-900/40"
-        >
-          <motion.div animate={{ rotate: isNavOpen ? 90 : 0 }} transition={{ type: "spring", stiffness: 200, damping: 15 }}>
-            {isNavOpen ? <X size={24} /> : <Menu size={24} />}
-          </motion.div>
-        </motion.button>
-      </div>
-
-      {/* Mobile Navigation Overlay */}
-      <AnimatePresence>
-        {isNavOpen && (
-          <motion.div 
-            initial={{ opacity: 0, y: 50, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 50, scale: 0.9 }}
-            className="md:hidden fixed bottom-24 right-6 glass-panel p-3 rounded-3xl flex flex-col gap-2 z-[50] shadow-2xl"
-          >
-            {navItems.map(item => (
-              <button key={item.id} onClick={() => { 
-                setActiveTab(item.id as TabType); 
-                setProfileViewUserId(null); 
-                setActiveCommunityId(null);
-                setIsNavOpen(false); 
-              }}
-                className={`flex items-center gap-3 px-4 py-3 rounded-2xl font-bold transition-all ${activeTab === item.id ? 'bg-[#2A2B36] text-indigo-400 shadow-sm' : 'text-slate-300 hover:bg-[#1A1B22]'}`}
-              >
-                <item.icon size={20} className={activeTab === item.id ? 'stroke-[2.5px]' : ''} />
-                <span>{item.label}</span>
-              </button>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Sidebar Navigation (Desktop) */}
-      <nav className="hidden md:flex flex-col w-72 fixed left-0 h-screen glass-sidebar p-8 z-40">
-        <div className="flex items-center gap-4 mb-12">
-          <div className="w-11 h-11 bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg shadow-indigo-500/20 rounded-2xl flex items-center justify-center text-white">
-            <Zap size={24} fill="currentColor" />
-          </div>
-          <span className="text-3xl font-black tracking-tighter text-white">VIBE</span>
-        </div>
-        <div className="flex flex-col gap-2">
-          {navItems.map((item) => (
-            <button key={item.id} onClick={() => { 
-              setActiveTab(item.id as TabType); 
-              setProfileViewUserId(null); 
-              setActiveCommunityId(null);
-            }}
-              className={`flex items-center gap-4 px-5 py-4 rounded-2xl font-bold transition-all duration-300 group ${
-                activeTab === item.id 
-                  ? 'bg-white/10 shadow-xl text-white' 
-                  : 'text-slate-400 hover:bg-white/5 hover:text-white'
-              }`}
+    <div className="flex flex-col h-screen w-full bg-vk-bg text-vk-text font-sans relative">
+      <Toaster position="top-center" richColors />
+      {/* Контентная область */}
+      <div className={`flex-1 flex flex-col overflow-hidden relative transition-opacity duration-300 ${activeChat || activeCommunity || selectedPost || isCreatingCommunity || isAdminPanelOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+        {viewingProfile ? (
+          <div className="flex-1 flex flex-col w-full h-full overflow-y-auto bg-vk-bg pb-20 no-scrollbar">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.98 }} 
+              animate={{ opacity: 1, scale: 1 }} 
+              className="flex flex-col w-full"
             >
-              <item.icon size={22} className={`transition-colors ${activeTab === item.id ? 'text-indigo-400' : 'group-hover:text-indigo-400'}`} />
-              <span className="text-[17px]">{item.label}</span>
-              {activeTab === item.id && <motion.div layoutId="activeTab" className="ml-auto w-1.5 h-1.5 bg-indigo-500 rounded-full shadow-[0_0_10px_rgba(99,102,241,0.8)]" />}
-            </button>
-          ))}
-        </div>
-        
-        <div className="mt-auto pt-8">
-          {user && (
-            <div className="mb-6 p-4 rounded-3xl bg-white/5 border border-white/5 flex items-center gap-3">
-              <img src={currentUserData?.profileImage} alt="" className="w-10 h-10 rounded-full object-cover ring-2 ring-white/10" />
-              <div className="flex-1 overflow-hidden">
-                <div className="font-bold text-sm text-white truncate">{currentUserData?.name}</div>
-                <div className="text-xs text-slate-500 truncate">@{currentUserData?.username}</div>
-              </div>
-              <button onClick={() => setIsAdminPanelOpen(true)} className="p-2 hover:bg-white/10 rounded-xl transition-colors text-slate-400 hover:text-white">
-                <Settings size={18} />
-              </button>
-            </div>
-          )}
-          <button onClick={handleLogout} className="flex items-center gap-4 px-5 py-4 w-full text-slate-500 hover:text-red-400 hover:bg-red-400/5 rounded-2xl transition-all font-bold">
-            <LogOut size={22} />
-            <span className="text-[17px]">Выйти</span>
-          </button>
-        </div>
-      </nav>
-
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-3xl w-full md:ml-72 pb-24 md:pb-10 min-h-screen px-3 sm:px-6 pt-6 sm:pt-10">
-        <AnimatePresence mode="wait">
-          <motion.div key={activeTab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }} className="w-full">
-            
-            {/* FEED TAB */}
-            {activeTab === 'feed' && (
-              <div>
-                <div className="flex justify-between items-center mb-8 px-2">
-                  <h1 className="text-4xl font-black tracking-tighter text-white">Лента</h1>
-                  <div className="flex bg-white/5 backdrop-blur-md rounded-2xl p-1.5 border border-white/5 shadow-inner">
-                    <button onClick={() => setFeedTab('friends')} className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 ${feedTab === 'friends' ? 'bg-white/10 text-white shadow-xl ring-1 ring-white/10' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>Друзья</button>
-                    <button onClick={() => setFeedTab('global')} className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 ${feedTab === 'global' ? 'bg-white/10 text-white shadow-xl ring-1 ring-white/10' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>Глобальная</button>
-                  </div>
-                </div>
+              {/* Обложка и шапка */}
+              <div className="relative h-56 sm:h-72 w-full overflow-hidden">
+                <motion.img 
+                  initial={{ scale: 1.1 }}
+                  animate={{ scale: 1 }}
+                  transition={{ duration: 10, repeat: Infinity, repeatType: "reverse" }}
+                  src={`https://picsum.photos/seed/${viewingProfile.id}cover/1200/400`} 
+                  alt="Cover" 
+                  className="absolute inset-0 w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute inset-0 bg-blue-600"></div>
                 
-                {/* Create Post Bento Card */}
-                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="bento-card mb-10">
-                  <div className="flex gap-5">
-                    <div className="relative">
-                      <img src={currentUserData.profileImage} alt="Avatar" className="w-14 h-14 rounded-full object-cover ring-2 ring-white/10 shadow-lg" />
-                      <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-4 border-[#16161D] shadow-sm"></div>
-                    </div>
-                    <div className="flex-1">
-                      <textarea 
-                        value={newPostText} 
-                        onChange={(e) => setNewPostText(e.target.value)} 
-                        placeholder="Что у вас нового?" 
-                        className="w-full bg-transparent border-none focus:ring-0 text-white placeholder-slate-500 text-lg font-medium resize-none min-h-[100px] py-2" 
-                      />
-                      
-                      {newPostImage && (
-                        <div className="relative mb-6 mt-4 rounded-[2rem] overflow-hidden inline-block shadow-2xl ring-1 ring-white/10">
-                          <img src={newPostImage} alt="Preview" className="max-h-80 object-contain rounded-[2rem]" />
-                          <button onClick={() => setNewPostImage('')} className="absolute top-3 right-3 p-2.5 bg-black/40 hover:bg-red-500/80 text-white rounded-full transition-all backdrop-blur-xl shadow-xl"><X size={18} /></button>
-                        </div>
-                      )}
-
-                      <div className="flex justify-between items-center pt-6 border-t border-white/5">
-                        <div className="flex gap-3">
-                          <label className="glass-icon-btn cursor-pointer p-3"><ImageIcon size={22} /><input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={(e) => handleImageUpload(e, 'post')} disabled={currentUserData.isFrozen || currentUserData.isMuted} /></label>
-                          <button className="glass-icon-btn p-3"><Video size={22} /></button>
-                          <button className="glass-icon-btn p-3"><Music size={22} /></button>
-                        </div>
-                        <button 
-                          onClick={handleCreatePost} 
-                          disabled={isPosting || (!newPostText.trim() && !newPostImage) || currentUserData.isFrozen || currentUserData.isMuted} 
-                          className="glass-button-primary px-10 py-3.5 rounded-2xl font-black text-sm tracking-wide uppercase disabled:opacity-50 flex items-center gap-3"
-                        >
-                          {isPosting ? 'Публикация...' : 'Опубликовать'} <Send size={18} fill="currentColor" />
-                        </button>
-                      </div>
-                    </div>
+                <div className="absolute top-0 left-0 right-0 p-5 flex justify-between items-center z-10">
+                  <div className="flex items-center gap-3">
+                    <motion.button 
+                      whileHover={{ scale: 1.1, x: -2 }}
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => setViewingProfile(null)} 
+                      className="p-2.5 text-white hover:bg-white/20 rounded-full  transition-all outline-none shadow-lg"
+                    >
+                      <ChevronLeft size={24} />
+                    </motion.button>
+                    <h2 className="text-white font-bold text-xl drop-shadow-lg tracking-tight">Профиль</h2>
                   </div>
-                </motion.div>
-
-                {/* Posts List */}
-                <div className="space-y-6">
-                  {posts.filter(post => {
-                    if (feedTab === 'friends') {
-                      const myFriendIds = friends.filter(f => f.status === 'accepted').map(f => f.user1 === user.uid ? f.user2 : f.user1);
-                      return !post.communityId && (post.userId === user.uid || myFriendIds.includes(post.userId));
-                    } else {
-                      if (post.communityId) {
-                        const comm = communities.find(c => c.id === post.communityId);
-                        return comm?.isVerified;
-                      } else {
-                        const author = allUsers.find(u => u.id === post.userId) || post;
-                        return author.isVerified;
-                      }
-                    }
-                  }).length === 0 ? (
-                    <div className="text-center py-16 text-slate-400 font-semibold glass-panel rounded-3xl">Здесь пока нет постов.</div>
-                  ) : (
-                    posts.filter(post => {
-                      if (feedTab === 'friends') {
-                        const myFriendIds = friends.filter(f => f.status === 'accepted').map(f => f.user1 === user.uid ? f.user2 : f.user1);
-                        return !post.communityId && (post.userId === user.uid || myFriendIds.includes(post.userId));
-                      } else {
-                        if (post.communityId) {
-                          const comm = communities.find(c => c.id === post.communityId);
-                          return comm?.isVerified;
-                        } else {
-                          const author = allUsers.find(u => u.id === post.userId) || post;
-                          return author.isVerified;
-                        }
-                      }
-                    }).map(post => {
-                      const author = allUsers.find(u => u.id === post.userId) || post;
-                      const community = post.communityId ? communities.find(c => c.id === post.communityId) : null;
-                      const isLiked = post.likes?.includes(user?.uid);
-                      return (
-                        <motion.div 
-                          key={post.id} 
-                          initial={{ opacity: 0, scale: 0.98, y: 20 }} 
-                          whileInView={{ opacity: 1, scale: 1, y: 0 }} 
-                          viewport={{ once: true }}
-                          transition={{ duration: 0.5, ease: "easeOut" }}
-                          className="bento-card group"
-                        >
-                          <div className="flex justify-between items-start mb-6">
-                            <div className="flex gap-4 items-center">
-                              <div className="relative">
-                                <img src={community ? community.coverImage || author.profileImage : author.profileImage || post.authorImage} alt="Author" className="w-12 h-12 rounded-full object-cover ring-2 ring-white/10 shadow-md" />
-                                {author.isOnline && !community && <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-green-500 rounded-full border-[3px] border-[#16161D]"></div>}
-                              </div>
-                              <div>
-                                <div className="font-black text-white flex items-center gap-2 text-[17px] tracking-tight">
-                                  <span className="hover:text-indigo-400 transition-colors cursor-pointer">{community ? community.name : author.name || post.authorName}</span>
-                                  {(community ? community.isVerified : author.isVerified) && <div className="bg-indigo-500/20 p-0.5 rounded-full"><BadgeCheck size={16} className="text-indigo-400" /></div>}
-                                  {(community ? community.isAdmin : author.isAdmin) && <Shield size={14} className="text-purple-500" />}
-                                  {!community && renderVipBadge(author.vipStatus)}
-                                </div>
-                                <div className="text-xs text-slate-500 font-bold flex items-center gap-2 tracking-wide uppercase">
-                                  @{community ? community.username : author.username || post.authorUsername} • {formatTimeAgo(post.createdAt)}
-                                </div>
-                              </div>
-                            </div>
-                            {user.uid === post.userId && (
-                              <button onClick={(e) => handleDeletePost(post.id, e)} className="p-2.5 text-slate-600 hover:text-red-400 hover:bg-red-400/10 rounded-2xl transition-all opacity-0 group-hover:opacity-100"><Trash2 size={20} /></button>
-                            )}
-                          </div>
-                          
-                          {post.text && <p className="text-slate-100 font-medium mb-6 whitespace-pre-wrap text-[17px] leading-relaxed break-words">{post.text}</p>}
-                          
-                          {post.image && (
-                            <div className="rounded-[2rem] overflow-hidden mb-6 shadow-2xl ring-1 ring-white/10">
-                              <img src={post.image} alt="Post content" className="w-full h-auto max-h-[600px] object-cover hover:scale-105 transition-transform duration-1000" />
-                            </div>
-                          )}
-                          
-                          <div className="flex gap-10 pt-6 border-t border-white/5">
-                            <button onClick={(e) => handleLikePost(post.id, e)} className={`flex items-center gap-2.5 transition-all duration-300 group/btn ${isLiked ? 'text-rose-500 scale-105' : 'text-slate-400 hover:text-rose-400'}`}>
-                              <div className={`p-2.5 rounded-2xl transition-all duration-300 ${isLiked ? 'bg-rose-500/10' : 'group-hover/btn:bg-rose-500/10'}`}>
-                                <Heart size={22} fill={isLiked ? "currentColor" : "none"} className="group-active/btn:scale-75 transition-transform" />
-                              </div>
-                              <span className="text-base font-black tracking-tight">{post.likes?.length || 0}</span>
-                            </button>
-                            <button className="flex items-center gap-2.5 text-slate-400 hover:text-indigo-400 transition-all duration-300 group/btn">
-                              <div className="p-2.5 rounded-2xl group-hover/btn:bg-indigo-500/10 transition-all duration-300">
-                                <MessageCircle size={22} />
-                              </div>
-                              <span className="text-base font-black tracking-tight">{post.comments || 0}</span>
-                            </button>
-                            <button className="flex items-center gap-2 text-slate-400 hover:text-emerald-400 transition-all duration-300 ml-auto p-2.5 rounded-2xl hover:bg-emerald-500/10">
-                              <Share2 size={22} />
-                            </button>
-                          </div>
-                        </motion.div>
-                      );
-                    })
-                  )}
                 </div>
               </div>
-            )}
 
-            {/* FRIENDS TAB */}
-            {activeTab === 'friends' && (
-              <div className="max-w-5xl mx-auto px-4">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
-                  <div>
-                    <h1 className="text-5xl font-black tracking-tighter text-white mb-2">Друзья</h1>
-                    <p className="text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px]">Управление контактами и поиск</p>
+              {/* Информация пользователя */}
+              <div className="px-6 relative max-w-2xl mx-auto w-full">
+                <div className="flex flex-col items-center -mt-24 sm:-mt-28 mb-10">
+                  <motion.div 
+                    className="relative mb-6"
+                    initial={{ y: 20, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ type: "spring", damping: 15 }}
+                  >
+                    <div className="w-40 h-40 sm:w-48 sm:h-48 rounded-[40px] border-[6px] border-white bg-white overflow-hidden shadow-2xl relative z-10">
+                      <img src={viewingProfile.avatar} alt="Avatar" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    </div>
+                    <motion.div 
+                      animate={{ scale: [1, 1.2, 1] }}
+                      transition={{ repeat: Infinity, duration: 2 }}
+                      className="absolute bottom-3 right-3 sm:bottom-4 sm:right-4 w-10 h-10 bg-green-500 rounded-full border-[6px] border-white shadow-xl z-20" 
+                    />
+                  </motion.div>
+
+                  <div className="text-center mb-6">
+                    <motion.h2 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="text-3xl sm:text-4xl font-black leading-tight tracking-tighter text-vk-text flex items-center justify-center gap-2"
+                    >
+                      {viewingProfile.name}
+                      <div className="flex items-center gap-1">
+                        {viewingProfile.isCreator && <Badge type="creator" size={26} />}
+                        {viewingProfile.isAdmin && <Badge type="admin" size={26} />}
+                        {viewingProfile.isVerified && <Badge type="verified" size={26} />}
+                      </div>
+                    </motion.h2>
+                    <div className="flex items-center justify-center gap-2 mt-2 mb-2">
+                      {viewingProfile.isOnline ? (
+                        <div className="flex items-center gap-2 bg-green-50 px-3 py-1 rounded-full border border-green-100">
+                          <span className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse"></span>
+                          <span className="text-xs font-bold text-green-600 uppercase tracking-widest">В сети</span>
+                        </div>
+                      ) : (
+                        <span className="text-xs font-bold text-vk-text-muted uppercase tracking-widest">{viewingProfile.lastSeen || 'Был(а) недавно'}</span>
+                      )}
+                    </div>
+                    <p className="text-vk-text-muted text-sm font-bold uppercase tracking-widest mt-1 opacity-60">@{viewingProfile.id} • Москва, Россия</p>
                   </div>
-                  <div className="flex bg-white/5 backdrop-blur-xl rounded-2xl p-1.5 border border-white/10 shadow-2xl ring-1 ring-white/5">
-                    {[
-                      { id: 'all', label: 'Все' },
-                      { id: 'online', label: 'Онлайн' },
-                      { id: 'requests', label: 'Заявки', count: friends.filter(f => f.user2 === user.uid && f.status === 'pending').length }
-                    ].map(tab => (
-                      <button
-                        key={tab.id}
-                        onClick={() => setFriendsTab(tab.id as any)}
-                        className={`px-8 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all duration-500 relative group ${
-                          friendsTab === tab.id 
-                            ? 'bg-white/10 text-white shadow-xl ring-1 ring-white/20' 
-                            : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'
-                        }`}
+
+                  {viewingProfile.about && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.2, duration: 0.5 }}
+                      className="text-center px-6 mb-8 text-sm text-vk-text leading-relaxed font-medium bg-white/50  p-4 rounded-3xl border border-black/5 shadow-sm"
+                    >
+                      {viewingProfile.about.split('\n').map((line, i) => (
+                        <React.Fragment key={i}>{line}<br/></React.Fragment>
+                      ))}
+                    </motion.div>
+                  )}
+
+                  <div className="flex flex-wrap justify-center gap-2.5 mb-8">
+                    {['Музыка', 'Дизайн', 'Спорт', 'Путешествия'].map((tag, idx) => (
+                      <motion.span 
+                        key={tag}
+                        whileHover={{ scale: 1.05, backgroundColor: 'rgba(18, 10, 143, 0.1)' }}
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: 0.3 + idx * 0.05 }}
+                        className="bg-black/5 text-vk-text px-4 py-2 rounded-2xl text-[11px] font-bold uppercase tracking-widest cursor-pointer transition-all border border-black/5"
                       >
-                        <span className="relative z-10">{tab.label}</span>
-                        {tab.count !== undefined && tab.count > 0 && (
-                          <span className="absolute -top-1 -right-1 bg-indigo-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow-lg shadow-indigo-500/40 border-2 border-[#0D0D12] z-20">
-                            {tab.count}
-                          </span>
-                        )}
-                        {friendsTab === tab.id && (
-                          <motion.div layoutId="friendsTabActive" className="absolute inset-0 bg-gradient-to-r from-indigo-500/10 to-purple-500/10 rounded-xl -z-0" />
-                        )}
-                      </button>
+                        {tag}
+                      </motion.span>
                     ))}
                   </div>
-                </div>
 
-                <div className="glass-panel p-2 rounded-[2rem] flex items-center mb-12 shadow-2xl ring-1 ring-white/10 group focus-within:ring-indigo-500/30 transition-all bg-white/5">
-                  <div className="w-14 h-14 flex items-center justify-center text-slate-500 group-focus-within:text-indigo-400 transition-colors">
-                    <Search size={24} />
-                  </div>
-                  <input 
-                    type="text" 
-                    placeholder="Поиск по имени или @username..." 
-                    value={friendSearch} 
-                    onChange={e => setFriendSearch(e.target.value)} 
-                    className="bg-transparent border-none outline-none px-2 py-4 w-full text-white font-bold placeholder-slate-600 text-lg tracking-tight" 
-                  />
-                </div>
-
-                <div className="space-y-8">
-                  {/* Friend Requests */}
-                  {friendsTab === 'requests' && (
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-                      <h2 className="text-2xl font-black text-white mb-8 px-2 tracking-tight flex items-center gap-3">
-                        Заявки в друзья
-                        <span className="h-px flex-1 bg-white/5"></span>
-                      </h2>
-                      {friends.filter(f => f.user2 === user.uid && f.status === 'pending').length === 0 ? (
-                        <div className="text-center py-24 text-slate-500 font-bold glass-panel rounded-[3rem] border border-dashed border-white/10 bg-white/5">
-                          <UserPlus size={48} className="mx-auto mb-4 opacity-20" />
-                          <p className="uppercase tracking-widest text-xs">Нет новых заявок</p>
-                        </div>
-                      ) : (
-                        <div className="grid gap-6">
-                          {friends.filter(f => f.user2 === user.uid && f.status === 'pending').map(req => {
-                            const reqUser = allUsers.find(u => u.id === req.user1);
-                            if (!reqUser) return null;
-                            return (
-                              <motion.div key={req.id} layout className="glass-panel p-6 rounded-[2.5rem] flex items-center justify-between group hover:bg-white/5 transition-all ring-1 ring-white/5 shadow-xl">
-                                <div className="flex items-center gap-6">
-                                  <div className="relative">
-                                    <img src={reqUser.profileImage} alt="" className="w-20 h-20 rounded-3xl object-cover ring-2 ring-white/10 shadow-2xl group-hover:scale-105 transition-transform duration-500" />
-                                    <div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-4 border-[#0D0D12] ${reqUser.isOnline ? 'bg-green-500' : 'bg-slate-600'}`}></div>
-                                  </div>
-                                  <div>
-                                    <div className="font-black text-white text-xl flex items-center gap-2 tracking-tight mb-1">
-                                      {reqUser.name} 
-                                      {renderVipBadge(reqUser.vipStatus)}
-                                    </div>
-                                    <div className="text-xs text-slate-500 font-black tracking-[0.2em] uppercase">@{reqUser.username}</div>
-                                  </div>
-                                </div>
-                                <div className="flex gap-3">
-                                  <button onClick={() => handleAcceptFriend(req.id)} className="glass-button-primary px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-indigo-500/20 active:scale-95 transition-all">Принять</button>
-                                  <button onClick={() => handleRemoveFriend(req.id)} className="glass-button px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-slate-400 hover:text-white active:scale-95 transition-all">Отклонить</button>
-                                </div>
-                              </motion.div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </motion.div>
-                  )}
-
-                  {/* My Friends */}
-                  {(friendsTab === 'all' || friendsTab === 'online') && (
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-                      <h2 className="text-2xl font-black text-white mb-8 px-2 tracking-tight flex items-center gap-3">
-                        {friendsTab === 'online' ? 'Друзья онлайн' : 'Мои друзья'}
-                        <span className="h-px flex-1 bg-white/5"></span>
-                      </h2>
-                      <div className="grid gap-6 sm:grid-cols-2">
-                        {friends.filter(f => f.status === 'accepted').map(f => {
-                          const friendId = f.user1 === user.uid ? f.user2 : f.user1;
-                          const friendUser = allUsers.find(u => u.id === friendId);
-                          if (!friendUser) return null;
-                          if (friendSearch && !friendUser.name.toLowerCase().includes(friendSearch.toLowerCase())) return null;
-                          if (friendsTab === 'online' && !friendUser.isOnline) return null;
-                          return (
-                            <motion.div key={f.id} layout className="glass-panel p-5 rounded-[2.5rem] flex items-center justify-between group hover:bg-white/5 transition-all ring-1 ring-white/5 shadow-xl">
-                              <div className="flex items-center gap-5 overflow-hidden">
-                                <div className="relative cursor-pointer group/avatar shrink-0" onClick={() => { setActiveTab('profile'); setProfileViewUserId(friendUser.id); }}>
-                                  <img src={friendUser.profileImage} alt="" className="w-16 h-16 rounded-2xl object-cover ring-2 ring-white/10 shadow-xl group-hover/avatar:scale-105 transition-transform duration-500" />
-                                  {friendUser.isOnline && <div className="absolute -bottom-1 -right-1 w-4.5 h-4.5 bg-green-500 rounded-full border-[3.5px] border-[#0D0D12]"></div>}
-                                </div>
-                                <div className="overflow-hidden">
-                                  <div className="font-black text-white flex items-center gap-2 cursor-pointer hover:text-indigo-400 transition-colors tracking-tight truncate text-lg" onClick={() => { setActiveTab('profile'); setProfileViewUserId(friendUser.id); }}>
-                                    {friendUser.name} 
-                                    {friendUser.isVerified && <BadgeCheck size={18} className="text-indigo-400" />} 
-                                    {renderVipBadge(friendUser.vipStatus)}
-                                  </div>
-                                  <div className="truncate opacity-80 group-hover:opacity-100 transition-opacity">{getUserStatus(friendUser)}</div>
-                                </div>
-                              </div>
-                              <div className="flex gap-2 shrink-0">
-                                <button onClick={() => handleStartChat(friendUser.id)} className="glass-icon-btn w-12 h-12 flex items-center justify-center rounded-xl text-slate-400 hover:text-indigo-400 transition-all active:scale-90"><MessageCircle size={22} /></button>
-                                <button onClick={() => handleRemoveFriend(f.id)} className="glass-icon-btn w-12 h-12 flex items-center justify-center rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all active:scale-90"><UserMinus size={22} /></button>
-                              </div>
-                            </motion.div>
-                          );
-                        })}
-                        {friends.filter(f => f.status === 'accepted').filter(f => {
-                          if (friendsTab !== 'online') return true;
-                          const friendId = f.user1 === user.uid ? f.user2 : f.user1;
-                          const friendUser = allUsers.find(u => u.id === friendId);
-                          return friendUser?.isOnline;
-                        }).length === 0 && (
-                          <div className="text-center py-24 text-slate-500 font-bold glass-panel rounded-[3rem] border border-dashed border-white/10 bg-white/5 col-span-full">
-                            <UsersRound size={48} className="mx-auto mb-4 opacity-20" />
-                            <p className="uppercase tracking-widest text-xs">У вас пока нет {friendsTab === 'online' ? 'друзей онлайн' : 'друзей'}</p>
-                          </div>
-                        )}
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {/* Find Users */}
-                  {friendsTab === 'all' && (
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-                      <h2 className="text-2xl font-black text-white mb-8 px-2 tracking-tight flex items-center gap-3">
-                        Найти людей
-                        <span className="h-px flex-1 bg-white/5"></span>
-                      </h2>
-                      <div className="grid gap-6 sm:grid-cols-2">
-                        {allUsers.filter(u => u.id !== user.uid && (!friendSearch || u.name.toLowerCase().includes(friendSearch.toLowerCase()))).slice(0, 10).map(u => {
-                          const isFriend = friends.some(f => (f.user1 === u.id && f.user2 === user.uid) || (f.user2 === u.id && f.user1 === user.uid));
-                          if (isFriend) return null;
-                          return (
-                            <motion.div key={u.id} layout className="glass-panel p-5 rounded-[2.5rem] flex items-center justify-between group hover:bg-white/5 transition-all ring-1 ring-white/5 shadow-xl">
-                              <div className="flex items-center gap-5 overflow-hidden">
-                                <div className="relative cursor-pointer group/avatar shrink-0" onClick={() => { setActiveTab('profile'); setProfileViewUserId(u.id); }}>
-                                  <img src={u.profileImage} alt="" className="w-16 h-16 rounded-2xl object-cover ring-2 ring-white/10 shadow-xl group-hover/avatar:scale-105 transition-transform duration-500" />
-                                  {u.isOnline && <div className="absolute -bottom-1 -right-1 w-4.5 h-4.5 bg-green-500 rounded-full border-[3.5px] border-[#0D0D12]"></div>}
-                                </div>
-                                <div className="overflow-hidden">
-                                  <div className="font-black text-white flex items-center gap-2 cursor-pointer hover:text-indigo-400 transition-colors tracking-tight truncate text-lg" onClick={() => { setActiveTab('profile'); setProfileViewUserId(u.id); }}>
-                                    {u.name} 
-                                    {u.isVerified && <BadgeCheck size={18} className="text-indigo-400" />} 
-                                    {renderVipBadge(u.vipStatus)}
-                                  </div>
-                                  <div className="text-xs text-slate-500 font-black tracking-[0.2em] uppercase truncate">@{u.username}</div>
-                                </div>
-                              </div>
-                              <button onClick={() => handleAddFriend(u.id)} className="glass-icon-btn w-12 h-12 flex items-center justify-center rounded-xl text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 transition-all active:scale-90"><UserPlus size={22} /></button>
-                            </motion.div>
-                          );
-                        })}
-                      </div>
-                    </motion.div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* MESSAGES TAB */}
-            {activeTab === 'messages' && (
-              <div className="h-[calc(100vh-120px)] flex flex-col max-w-5xl mx-auto px-4">
-                {!activeChatId ? (
-                  <>
-                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
-                      <div>
-                        <h1 className="text-5xl font-black tracking-tighter text-white mb-2">Сообщения</h1>
-                        <p className="text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px]">Ваши личные диалоги и чаты</p>
-                      </div>
-                    </div>
-
-                    <div className="glass-panel p-2 rounded-[2rem] flex items-center mb-12 shadow-2xl ring-1 ring-white/10 group focus-within:ring-indigo-500/30 transition-all bg-white/5">
-                      <div className="w-14 h-14 flex items-center justify-center text-slate-500 group-focus-within:text-indigo-400 transition-colors">
-                        <Search size={24} />
-                      </div>
-                      <input 
-                        type="text" 
-                        placeholder="Поиск по диалогам..." 
-                        value={messageSearch} 
-                        onChange={e => setMessageSearch(e.target.value)} 
-                        className="bg-transparent border-none outline-none px-2 py-4 w-full text-white font-bold placeholder-slate-600 text-lg tracking-tight" 
-                      />
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-2 pb-10">
-                      {chats.length === 0 ? (
-                        <div className="text-center py-32 text-slate-500 font-black glass-panel rounded-[3rem] border border-dashed border-white/10 bg-white/5">
-                          <MessageSquare size={48} className="mx-auto mb-4 opacity-20" />
-                          <p className="uppercase tracking-widest text-xs">У вас пока нет диалогов</p>
-                        </div>
-                      ) : (
-                        chats.map(chat => {
-                          const otherUserId = chat.participants.find((p: string) => p !== user.uid);
-                          const otherUser = allUsers.find(u => u.id === otherUserId);
-                          if (!otherUser) return null;
-                          if (messageSearch && !otherUser.name.toLowerCase().includes(messageSearch.toLowerCase())) return null;
-                          return (
-                            <motion.div 
-                              key={chat.id} 
-                              initial={{ opacity: 0, y: 10 }} 
-                              animate={{ opacity: 1, y: 0 }} 
-                              onClick={() => setActiveChatId(chat.id)} 
-                              className="glass-panel p-6 flex items-center gap-6 cursor-pointer group hover:bg-white/5 transition-all ring-1 ring-white/5 shadow-xl rounded-[2.5rem]"
-                            >
-                              <div className="relative shrink-0">
-                                <img src={otherUser.profileImage} alt="" className="w-20 h-20 rounded-3xl object-cover ring-2 ring-white/10 shadow-2xl group-hover:ring-indigo-500/50 transition-all duration-500" />
-                                {otherUser.isOnline && <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 rounded-full border-[4px] border-[#0D0D12] shadow-lg"></div>}
-                              </div>
-                              <div className="flex-1 overflow-hidden">
-                                <div className="flex justify-between items-center mb-2">
-                                  <div className="font-black text-white text-xl tracking-tight group-hover:text-indigo-400 transition-colors flex items-center gap-2">
-                                    {otherUser.name}
-                                    {otherUser.isVerified && <BadgeCheck size={18} className="text-indigo-400" />}
-                                  </div>
-                                  <div className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em]">{formatTimeAgo(chat.updatedAt)}</div>
-                                </div>
-                                <div className="text-slate-400 text-[15px] truncate font-bold tracking-tight opacity-80 group-hover:opacity-100 transition-opacity flex items-center gap-2">
-                                  {chat.lastMessageSenderId === user.uid && <span className="text-indigo-400 text-xs font-black uppercase tracking-widest">Вы:</span>}
-                                  {chat.lastMessage || 'Нет сообщений'}
-                                </div>
-                              </div>
-                            </motion.div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  // Active Chat View
-                  <div className="flex flex-col h-full glass-panel rounded-[3rem] overflow-hidden shadow-2xl ring-1 ring-white/10 bg-black/40 backdrop-blur-3xl">
-                    {/* Chat Header */}
-                    <div className="p-6 flex items-center gap-6 bg-white/5 backdrop-blur-3xl border-b border-white/10">
-                      <button onClick={() => setActiveChatId(null)} className="p-4 glass-icon-btn rounded-2xl text-white/70 hover:text-white transition-all active:scale-90"><ChevronLeft size={24} /></button>
-                      {(() => {
-                        const chat = chats.find(c => c.id === activeChatId);
-                        const otherUserId = chat?.participants.find((p: string) => p !== user.uid);
-                        const otherUser = allUsers.find(u => u.id === otherUserId);
-                        return otherUser ? (
-                          <div className="flex items-center gap-5">
-                            <div className="relative">
-                              <img src={otherUser.profileImage} alt="" className="w-14 h-14 rounded-2xl object-cover ring-2 ring-white/10 shadow-xl" />
-                              {otherUser.isOnline && <div className="absolute -bottom-1 -right-1 w-4.5 h-4.5 bg-green-500 rounded-full border-[3.5px] border-[#0D0D12]"></div>}
-                            </div>
-                            <div>
-                              <div className="font-black text-white text-xl tracking-tight flex items-center gap-2">
-                                {otherUser.name}
-                                {otherUser.isVerified && <BadgeCheck size={20} className="text-indigo-400" />}
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <div className={`w-2 h-2 rounded-full ${otherUser.isOnline ? 'bg-green-500 animate-pulse' : 'bg-slate-600'}`}></div>
-                                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">{otherUser.isOnline ? 'В сети' : 'Не в сети'}</span>
-                              </div>
-                            </div>
-                          </div>
-                        ) : <div className="text-slate-500 font-black uppercase tracking-widest text-[10px]">Загрузка...</div>;
-                      })()}
-                    </div>
-                    
-                    {/* Messages Area */}
-                    <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar bg-mesh bg-opacity-5">
-                      {chatMessages.map((msg, idx) => {
-                        const isMe = msg.senderId === user.uid;
-                        const prevMsg = idx > 0 ? chatMessages[idx - 1] : null;
-                        const isSameSender = prevMsg?.senderId === msg.senderId;
-                        
-                        return (
-                          <motion.div 
-                            key={msg.id} 
-                            initial={{ opacity: 0, scale: 0.9, y: 20 }} 
-                            animate={{ opacity: 1, scale: 1, y: 0 }} 
-                            className={`flex ${isMe ? 'justify-end' : 'justify-start'} ${isSameSender ? '-mt-6' : ''}`}
-                          >
-                            <div className={`max-w-[70%] group`}>
-                              <div className={`p-5 rounded-[2rem] shadow-2xl relative ${
-                                isMe 
-                                  ? 'bg-gradient-to-br from-indigo-600 to-indigo-700 text-white rounded-tr-md shadow-indigo-500/20 ring-1 ring-white/10' 
-                                  : 'glass-panel text-white rounded-tl-md ring-1 ring-white/5 bg-white/5'
-                              }`}>
-                                <p className="font-bold text-[15px] leading-relaxed break-words tracking-tight">{msg.text}</p>
-                                <div className={`text-[9px] mt-3 font-black uppercase tracking-[0.2em] opacity-40 ${isMe ? 'text-indigo-100' : 'text-slate-500'} text-right`}>
-                                  {msg.createdAt?.toDate().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-                                </div>
-                              </div>
-                            </div>
-                          </motion.div>
-                        );
-                      })}
-                    </div>
-                    
-                    {/* Input Area */}
-                    <div className="p-6 bg-white/5 backdrop-blur-3xl border-t border-white/10 flex items-center gap-5">
-                      <div className="flex gap-2">
-                        <button className="glass-icon-btn w-12 h-12 flex items-center justify-center rounded-xl text-slate-400 hover:text-indigo-400 transition-all active:scale-90"><ImageIcon size={22} /></button>
-                        <button className="glass-icon-btn w-12 h-12 flex items-center justify-center rounded-xl text-slate-400 hover:text-indigo-400 transition-all active:scale-90"><Video size={22} /></button>
-                      </div>
-                      <div className="flex-1 relative group">
-                        <input 
-                          type="text" 
-                          value={newMessageText} 
-                          onChange={e => setNewMessageText(e.target.value)}
-                          onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
-                          placeholder={currentUserData?.isMuted || currentUserData?.isFrozen ? "Отправка сообщений ограничена" : "Написать сообщение..."}
-                          disabled={currentUserData?.isMuted || currentUserData?.isFrozen}
-                          className="w-full glass-input rounded-2xl px-8 py-5 font-bold text-white placeholder-slate-600 disabled:opacity-50 focus:ring-2 focus:ring-indigo-500/30 transition-all bg-white/5 border-white/5"
-                        />
-                      </div>
-                      <button 
-                        onClick={handleSendMessage} 
-                        disabled={!newMessageText.trim() || currentUserData?.isMuted || currentUserData?.isFrozen} 
-                        className="w-16 h-16 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl transition-all disabled:opacity-50 shadow-2xl shadow-indigo-500/40 active:scale-90 flex items-center justify-center group"
+                  <div className="flex gap-4 w-full sm:w-auto">
+                    <motion.button 
+                      whileHover={{ scale: 1.02, y: -2 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => {
+                        setViewingProfile(null);
+                        setActiveChat({ 
+                          id: viewingProfile.id, 
+                          name: viewingProfile.name, 
+                          avatar: viewingProfile.avatar, 
+                          isOnline: viewingProfile.isOnline, 
+                          isAI: (viewingProfile as any).isAI,
+                          isVerified: viewingProfile.isVerified,
+                          userTier: (viewingProfile as any).userTier,
+                          isAdmin: viewingProfile.isAdmin,
+                          isCreator: viewingProfile.isCreator
+                        });
+                      }}
+                      className="flex-1 sm:flex-none bg-blue-600 text-white px-10 py-4 rounded-3xl font-bold text-sm uppercase tracking-widest shadow-xl hover:shadow-[#120a8f]/20 transition-all flex items-center justify-center gap-3"
+                    >
+                      <MessageCircle size={20} /> Сообщение
+                    </motion.button>
+                    {viewingProfile.isFriend ? (
+                      <motion.button 
+                        whileHover={{ scale: 1.02, y: -2 }}
+                        whileTap={{ scale: 0.98 }}
+                        className="flex-1 sm:flex-none bg-white border border-black/5 text-vk-text px-10 py-4 rounded-3xl font-bold text-sm uppercase tracking-widest shadow-lg hover:bg-black/5 transition-all flex items-center justify-center gap-3"
                       >
-                        <Send size={24} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform duration-300" />
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* COMMUNITIES TAB */}
-            {activeTab === 'communities' && (
-              <div className="max-w-6xl mx-auto px-4">
-                {!activeCommunityId ? (
-                  <>
-                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
-                      <div>
-                        <h1 className="text-5xl font-black tracking-tighter text-white mb-2">Сообщества</h1>
-                        <p className="text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px]">Исследуйте и вступайте в группы по интересам</p>
-                      </div>
-                      <button 
-                        onClick={() => setIsCreateCommunityModalOpen(true)} 
-                        disabled={currentUserData?.isFrozen || currentUserData?.isMuted} 
-                        className="glass-button-primary px-10 py-4 rounded-2xl font-black flex items-center gap-3 text-xs uppercase tracking-widest disabled:opacity-50 shadow-2xl shadow-indigo-500/30 active:scale-95 transition-all"
+                        <UserMinus size={20} /> Убрать
+                      </motion.button>
+                    ) : (
+                      <motion.button 
+                        whileHover={{ scale: 1.02, y: -2 }}
+                        whileTap={{ scale: 0.98 }}
+                        className="flex-1 sm:flex-none bg-white border border-black/5 text-vk-text px-10 py-4 rounded-3xl font-bold text-sm uppercase tracking-widest shadow-lg hover:bg-black/5 transition-all flex items-center justify-center gap-3"
                       >
-                        <Plus size={20} /> Создать
-                      </button>
-                    </div>
-
-                    <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
-                      {communities.map(comm => {
-                        const isFollowing = follows.some(f => f.followerId === user.uid && f.followingId === comm.id);
-                        return (
-                          <motion.div 
-                            key={comm.id} 
-                            initial={{ opacity: 0, y: 30 }} 
-                            animate={{ opacity: 1, y: 0 }} 
-                            onClick={() => { setActiveCommunityId(comm.id); setCommunityTab('posts'); }} 
-                            className="glass-panel rounded-[2.5rem] overflow-hidden shadow-2xl flex flex-col cursor-pointer hover:scale-[1.02] active:scale-[0.98] transition-all group ring-1 ring-white/5 bg-white/5"
-                          >
-                            <div className="h-40 relative overflow-hidden">
-                              {comm.coverImage ? (
-                                <img src={comm.coverImage} alt="" className="w-full h-full object-cover opacity-60 group-hover:scale-110 transition-transform duration-1000" />
-                              ) : (
-                                <div className="w-full h-full bg-mesh opacity-20 group-hover:scale-110 transition-transform duration-1000"></div>
-                              )}
-                              <div className="absolute inset-0 bg-gradient-to-t from-[#0D0D12] via-[#0D0D12]/40 to-transparent"></div>
-                              <div className="absolute bottom-4 left-6">
-                                <div className="flex items-center gap-2">
-                                  <h3 className="text-2xl font-black text-white tracking-tight group-hover:text-indigo-400 transition-colors">
-                                    {comm.name}
-                                  </h3>
-                                  {comm.isVerified && <BadgeCheck size={20} className="text-indigo-400" />}
-                                </div>
-                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em]">@{comm.username}</p>
-                              </div>
-                            </div>
-                            <div className="p-7 flex-1 flex flex-col">
-                              <p className="text-slate-400 font-bold mb-8 line-clamp-3 flex-1 leading-relaxed opacity-80 group-hover:opacity-100 transition-opacity text-sm">{comm.description || 'Нет описания'}</p>
-                              <div className="flex justify-between items-center mt-auto pt-6 border-t border-white/5">
-                                <div className="flex items-center gap-4">
-                                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                                    <UsersRound size={16} className="text-indigo-500" /> 
-                                    {comm.followersCount || 0}
-                                  </span>
-                                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                                    <MessageSquare size={16} className="text-purple-500" /> 
-                                    {comm.postsCount || 0}
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                  {isFollowing ? (
-                                    <button onClick={(e) => { e.stopPropagation(); handleUnfollow(comm.id, 'community'); }} className="glass-button px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest">Отписаться</button>
-                                  ) : (
-                                    <button onClick={(e) => { e.stopPropagation(); handleFollow(comm.id, 'community'); }} className="glass-button-primary px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest">Подписаться</button>
-                                  )}
-                                  <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-white/40 group-hover:bg-indigo-500 group-hover:text-white transition-all">
-                                    <ChevronRight size={20} />
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </motion.div>
-                        );
-                      })}
-                    </div>
-                  </>
-                ) : (
-                  <div className="space-y-12">
-                    {/* Community Header */}
-                    <div className="glass-panel rounded-[3rem] overflow-hidden shadow-2xl ring-1 ring-white/10 bg-black/40 backdrop-blur-3xl">
-                      <div className="h-80 relative overflow-hidden">
-                        {activeCommunity?.coverImage ? (
-                          <img src={activeCommunity.coverImage} alt="" className="w-full h-full object-cover opacity-60" />
-                        ) : (
-                          <div className="w-full h-full bg-mesh opacity-20"></div>
-                        )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-[#0D0D12] via-[#0D0D12]/20 to-transparent"></div>
-                        <button 
-                          onClick={() => setActiveCommunityId(null)} 
-                          className="absolute top-8 left-8 glass-icon-btn w-14 h-14 flex items-center justify-center rounded-2xl text-white/70 hover:text-white transition-all active:scale-90"
-                        >
-                          <ArrowLeft size={24} />
-                        </button>
-                      </div>
-                      <div className="px-12 pb-12 -mt-24 relative">
-                        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-10">
-                          <div className="flex flex-col md:flex-row items-center md:items-end gap-10 text-center md:text-left">
-                            <div className="w-48 h-48 rounded-[3rem] overflow-hidden bg-[#16161D] shadow-2xl ring-8 ring-[#0D0D12] group shrink-0">
-                              {activeCommunity?.photoURL ? (
-                                <img src={activeCommunity.photoURL} alt="" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center text-slate-700 bg-white/5">
-                                  <UsersRound size={80} />
-                                </div>
-                              )}
-                            </div>
-                            <div className="mb-4">
-                              <h2 className="text-5xl font-black text-white flex items-center justify-center md:justify-start gap-4 tracking-tighter mb-2">
-                                {activeCommunity?.name}
-                                {activeCommunity?.isVerified && <BadgeCheck size={32} className="text-indigo-400" />}
-                                {activeCommunity?.isAdmin && <Shield size={32} className="text-purple-500" />}
-                              </h2>
-                              <p className="text-slate-500 font-black uppercase tracking-[0.3em] text-xs">@{activeCommunity?.username}</p>
-                            </div>
-                          </div>
-                          <div className="flex justify-center md:justify-start gap-4 mb-4">
-                            {follows.some(f => f.followerId === user.uid && f.followingId === activeCommunityId) ? (
-                              <button 
-                                onClick={() => handleUnfollow(activeCommunityId!, 'community')} 
-                                className="glass-button px-10 py-4 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] flex items-center gap-3 active:scale-95 transition-all text-slate-400 hover:text-white"
-                              >
-                                <UserMinus size={20} /> Отписаться
-                              </button>
-                            ) : (
-                              <button 
-                                onClick={() => handleFollow(activeCommunityId!, 'community')} 
-                                className="glass-button-primary px-10 py-4 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] flex items-center gap-3 shadow-2xl shadow-indigo-500/30 active:scale-95 transition-all"
-                              >
-                                <UserPlus size={20} /> Подписаться
-                              </button>
-                            )}
-                            {activeCommunity?.creatorId === user.uid && (
-                              <button 
-                                onClick={() => setCommunityTab('settings')} 
-                                className="glass-button w-14 h-14 flex items-center justify-center rounded-2xl font-black active:scale-95 transition-all text-slate-400 hover:text-white"
-                              >
-                                <Settings size={24} />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                        <div className="mt-12 grid lg:grid-cols-3 gap-12">
-                          <div className="lg:col-span-2">
-                            <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] mb-4">О сообществе</h4>
-                            <p className="text-slate-300 font-bold leading-relaxed text-xl tracking-tight opacity-90">{activeCommunity?.description || 'Нет описания'}</p>
-                          </div>
-                          <div className="flex flex-wrap gap-8 lg:justify-end items-center">
-                            <div className="text-center">
-                              <p className="text-3xl font-black text-white tracking-tighter">{activeCommunity?.followersCount || 0}</p>
-                              <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Подписчики</p>
-                            </div>
-                            <div className="w-px h-10 bg-white/5 hidden sm:block"></div>
-                            <div className="text-center">
-                              <p className="text-3xl font-black text-white tracking-tighter">{activeCommunity?.postsCount || 0}</p>
-                              <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Публикации</p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Community Tabs */}
-                    <div className="flex gap-2 p-2 glass-panel rounded-[1.5rem] w-fit border border-white/10 shadow-2xl bg-black/20 backdrop-blur-xl">
-                      <button 
-                        onClick={() => setCommunityTab('posts')} 
-                        className={`px-10 py-4 rounded-xl font-black text-[10px] uppercase tracking-[0.2em] transition-all relative ${
-                          communityTab === 'posts' ? 'bg-white/10 text-white shadow-2xl ring-1 ring-white/10' : 'text-slate-500 hover:text-white hover:bg-white/5'
-                        }`}
-                      >
-                        Лента
-                      </button>
-                      <button 
-                        onClick={() => setCommunityTab('members')} 
-                        className={`px-10 py-4 rounded-xl font-black text-[10px] uppercase tracking-[0.2em] transition-all relative ${
-                          communityTab === 'members' ? 'bg-white/10 text-white shadow-2xl ring-1 ring-white/10' : 'text-slate-500 hover:text-white hover:bg-white/5'
-                        }`}
-                      >
-                        Подписчики
-                      </button>
-                      {activeCommunity?.creatorId === user.uid && (
-                        <button 
-                          onClick={() => setCommunityTab('settings')} 
-                          className={`px-10 py-4 rounded-xl font-black text-[10px] uppercase tracking-[0.2em] transition-all relative ${
-                            communityTab === 'settings' ? 'bg-white/10 text-white shadow-2xl ring-1 ring-white/10' : 'text-slate-500 hover:text-white hover:bg-white/5'
-                          }`}
-                        >
-                          Настройки
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Community Content */}
-                    <div className="space-y-12">
-                      {communityTab === 'posts' && (
-                        <div className="space-y-12">
-                          {(follows.some(f => f.followerId === user.uid && f.followingId === activeCommunityId) || activeCommunity?.creatorId === user.uid) && (
-                            <div className="glass-panel p-10 rounded-[3rem] shadow-2xl ring-1 ring-white/10 bg-black/40 backdrop-blur-3xl">
-                              <div className="flex gap-8">
-                                <div className="relative shrink-0">
-                                  <img src={currentUserData?.photoURL || ''} alt="" className="w-16 h-16 rounded-2xl object-cover ring-4 ring-white/5 shadow-2xl" />
-                                  <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 border-4 border-[#0D0D12] rounded-full shadow-lg"></div>
-                                </div>
-                                <div className="flex-1">
-                                  <textarea
-                                    value={newPostText}
-                                    onChange={(e) => setNewPostText(e.target.value)}
-                                    placeholder="Что нового в сообществе?"
-                                    className="w-full bg-white/5 border border-white/5 rounded-[2rem] p-8 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all min-h-[160px] resize-none font-bold text-lg leading-relaxed shadow-inner"
-                                  />
-                                  <div className="flex justify-between items-center mt-8">
-                                    <div className="flex gap-3">
-                                      <input type="file" id="community-post-image" className="hidden" onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) {
-                                          const reader = new FileReader();
-                                          reader.onloadend = () => setNewPostImage(reader.result as string);
-                                          reader.readAsDataURL(file);
-                                        }
-                                      }} />
-                                      <label htmlFor="community-post-image" className="glass-icon-btn w-12 h-12 flex items-center justify-center rounded-xl text-slate-400 hover:text-indigo-400 cursor-pointer transition-all active:scale-95">
-                                        <ImagePlus size={24} />
-                                      </label>
-                                    </div>
-                                    <button 
-                                      onClick={() => handleCreatePost(activeCommunityId!)}
-                                      disabled={!newPostText.trim() && !newPostImage}
-                                      className="glass-button-primary px-10 py-4 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] flex items-center gap-3 disabled:opacity-50 shadow-2xl shadow-indigo-500/30 active:scale-95 transition-all"
-                                    >
-                                      <Send size={18} /> Опубликовать
-                                    </button>
-                                  </div>
-                                  {newPostImage && (
-                                    <div className="mt-8 relative group inline-block">
-                                      <img src={newPostImage} alt="" className="max-h-80 rounded-[2rem] object-cover ring-4 ring-white/5 shadow-2xl" />
-                                      <button onClick={() => setNewPostImage('')} className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center bg-black/60 backdrop-blur-md text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all hover:bg-red-500 shadow-xl">
-                                        <X size={20} />
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          <div className="space-y-10">
-                            {posts.filter(p => p.communityId === activeCommunityId).length > 0 ? (
-                              posts.filter(p => p.communityId === activeCommunityId).map(post => {
-                                const author = allUsers.find(u => u.id === post.userId);
-                                const isLiked = post.likes?.includes(user.uid);
-                                return (
-                                  <motion.div 
-                                    key={post.id} 
-                                    initial={{ opacity: 0, y: 30 }} 
-                                    animate={{ opacity: 1, y: 0 }} 
-                                    className="glass-panel p-10 rounded-[3rem] shadow-2xl ring-1 ring-white/10 bg-black/20 group"
-                                  >
-                                    <div className="flex justify-between items-start mb-8">
-                                      <div className="flex items-center gap-5 cursor-pointer" onClick={() => { setProfileViewUserId(post.userId); setActiveTab('profile'); }}>
-                                        <div className="relative">
-                                          <img src={author?.photoURL || ''} alt="" className="w-14 h-14 rounded-2xl object-cover ring-2 ring-white/5 shadow-lg" />
-                                        </div>
-                                        <div>
-                                          <h4 className="text-xl font-black text-white tracking-tight group-hover:text-indigo-400 transition-colors flex items-center gap-2">
-                                            {author?.displayName}
-                                            {renderVipBadge(author?.vipStatus)}
-                                            {author?.isVerified && <BadgeCheck size={20} className="text-indigo-400" />}
-                                          </h4>
-                                          <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">{new Date(post.createdAt?.toDate()).toLocaleString()}</p>
-                                        </div>
-                                      </div>
-                                      {(post.userId === user.uid || activeCommunity?.creatorId === user.uid || currentUserData?.role === 'admin') && (
-                                        <button 
-                                          onClick={(e) => handleDeletePost(post.id, e)} 
-                                          className="glass-icon-btn w-10 h-10 flex items-center justify-center rounded-xl text-slate-600 hover:text-red-500 transition-all"
-                                        >
-                                          <Trash2 size={18} />
-                                        </button>
-                                      )}
-                                    </div>
-                                    <p className="text-slate-300 font-bold text-lg leading-relaxed mb-8 opacity-90 whitespace-pre-wrap">{post.content}</p>
-                                    {post.image && (
-                                      <div className="mb-8 rounded-[2rem] overflow-hidden ring-1 ring-white/10 shadow-2xl">
-                                        <img src={post.image} alt="" className="w-full h-auto max-h-[600px] object-cover" />
-                                      </div>
-                                    )}
-                                    <div className="flex items-center gap-8 pt-8 border-t border-white/5">
-                                      <button 
-                                        onClick={(e) => handleLikePost(post.id, e)}
-                                        className={`flex items-center gap-3 transition-all group/btn ${isLiked ? 'text-indigo-400' : 'text-slate-500 hover:text-indigo-400'}`}
-                                      >
-                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${isLiked ? 'bg-indigo-500/20' : 'bg-white/5 group-hover/btn:bg-indigo-500/20'}`}>
-                                          <Heart size={18} fill={isLiked ? 'currentColor' : 'none'} />
-                                        </div>
-                                        <span className="text-xs font-black uppercase tracking-widest">{post.likes?.length || 0}</span>
-                                      </button>
-                                      <div className="flex items-center gap-3 text-slate-500 hover:text-purple-400 transition-all group/btn">
-                                        <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center group-hover/btn:bg-purple-500/20 transition-all">
-                                          <MessageCircle size={18} />
-                                        </div>
-                                        <span className="text-xs font-black uppercase tracking-widest">0</span>
-                                      </div>
-                                      <button className="flex items-center gap-3 text-slate-500 hover:text-indigo-400 transition-all group/btn ml-auto">
-                                        <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center group-hover/btn:bg-indigo-500/20 transition-all">
-                                          <Share2 size={18} />
-                                        </div>
-                                      </button>
-                                    </div>
-                                  </motion.div>
-                                );
-                              })
-                            ) : (
-                              <div className="glass-panel p-20 rounded-[3rem] text-center border border-dashed border-white/10 bg-black/10">
-                                <div className="w-24 h-24 bg-white/5 rounded-[2rem] flex items-center justify-center mx-auto mb-8 text-slate-700">
-                                  <MessageSquare size={48} />
-                                </div>
-                                <h3 className="text-2xl font-black text-white tracking-tight mb-3">Здесь пока пусто</h3>
-                                <p className="text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px]">Станьте первым, кто опубликует пост!</p>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {communityTab === 'members' && (
-                        <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
-                          {follows.filter(f => f.followingId === activeCommunityId && f.type === 'community').map(follow => {
-                            const followerData = allUsers.find(u => u.id === follow.followerId);
-                            return (
-                              <motion.div 
-                                key={follow.id} 
-                                initial={{ opacity: 0, scale: 0.95 }} 
-                                animate={{ opacity: 1, scale: 1 }} 
-                                className="glass-panel p-6 rounded-[2rem] flex items-center justify-between group hover:scale-[1.02] transition-all ring-1 ring-white/5 bg-white/5"
-                              >
-                                <div className="flex items-center gap-4 cursor-pointer" onClick={() => { setProfileViewUserId(follow.followerId); setActiveTab('profile'); }}>
-                                  <div className="relative">
-                                    <img src={followerData?.photoURL || ''} alt="" className="w-14 h-14 rounded-2xl object-cover ring-2 ring-white/10" />
-                                    {followerData?.isOnline && <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 border-4 border-[#0D0D12] rounded-full"></div>}
-                                  </div>
-                                  <div>
-                                    <h5 className="font-black text-white flex items-center gap-2 tracking-tight group-hover:text-indigo-400 transition-colors">
-                                      {followerData?.displayName}
-                                      {renderVipBadge(followerData?.vipStatus)}
-                                    </h5>
-                                    <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Подписчик</p>
-                                  </div>
-                                </div>
-                                <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-white/20 group-hover:bg-indigo-500 group-hover:text-white transition-all">
-                                  <ChevronRight size={20} />
-                                </div>
-                              </motion.div>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {communityTab === 'settings' && activeCommunity?.creatorId === user.uid && (
-                        <div className="glass-panel p-8 rounded-3xl space-y-8">
-                          <h3 className="text-2xl font-extrabold text-white">Настройки сообщества</h3>
-                          <div className="space-y-6">
-                            <div className="grid gap-6 md:grid-cols-2">
-                              <div className="space-y-2">
-                                <label className="text-sm font-bold text-slate-400 ml-1">Название</label>
-                                <input
-                                  type="text"
-                                  value={activeCommunity?.name}
-                                  onChange={(e) => {
-                                    const updated = communities.map(c => c.id === activeCommunityId ? { ...c, name: e.target.value } : c);
-                                    setCommunities(updated);
-                                  }}
-                                  className="w-full glass-input rounded-xl px-4 py-3 text-white font-medium"
-                                />
-                              </div>
-                              <div className="space-y-2">
-                                <label className="text-sm font-bold text-slate-400 ml-1">ID сообщества</label>
-                                <input
-                                  type="text"
-                                  value={activeCommunity?.username}
-                                  onChange={(e) => {
-                                    const updated = communities.map(c => c.id === activeCommunityId ? { ...c, username: e.target.value } : c);
-                                    setCommunities(updated);
-                                  }}
-                                  className="w-full glass-input rounded-xl px-4 py-3 text-white font-medium"
-                                />
-                              </div>
-                            </div>
-                            <div className="space-y-2">
-                              <label className="text-sm font-bold text-slate-400 ml-1">Описание</label>
-                              <textarea
-                                value={activeCommunity?.description}
-                                onChange={(e) => {
-                                  const updated = communities.map(c => c.id === activeCommunityId ? { ...c, description: e.target.value } : c);
-                                  setCommunities(updated);
-                                }}
-                                className="w-full glass-input rounded-xl px-4 py-3 text-white font-medium min-h-[100px] resize-none"
-                              />
-                            </div>
-                            <div className="flex gap-4">
-                              <button
-                                onClick={async () => {
-                                  await updateDoc(doc(db, 'communities', activeCommunityId!), {
-                                    name: activeCommunity?.name,
-                                    username: activeCommunity?.username,
-                                    description: activeCommunity?.description
-                                  });
-                                  alert('Настройки сохранены');
-                                }}
-                                className="glass-button-primary px-8 py-3 rounded-xl font-bold"
-                              >
-                                Сохранить изменения
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* PROFILE TAB */}
-            {activeTab === 'profile' && viewingUserData && (
-              <div className="pb-8 space-y-8">
-                {/* Profile Header Card */}
-                <div className="glass-panel rounded-[2.5rem] overflow-hidden shadow-2xl border border-white/5 relative group">
-                  {/* Cover Image Section */}
-                  <div className="relative h-56 sm:h-80 w-full overflow-hidden bg-[#0A0A0F]">
-                    <motion.img 
-                      initial={{ scale: 1.1, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      transition={{ duration: 0.8 }}
-                      src={viewingUserData.coverImage} 
-                      alt="Cover" 
-                      className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
-                      referrerPolicy="no-referrer" 
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0F] via-[#0A0A0F]/20 to-transparent"></div>
-                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(99,102,241,0.1),transparent_70%)]"></div>
-                    
-                    {(profileViewUserId === null || profileViewUserId === user?.uid) && (
-                      <label className="absolute top-6 right-6 p-3.5 bg-white/5 hover:bg-white/10 backdrop-blur-xl rounded-2xl text-white transition-all cursor-pointer shadow-2xl border border-white/10 group/btn">
-                        <Camera size={20} className="group-hover/btn:scale-110 transition-transform" />
-                        <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'cover')} />
-                      </label>
+                        <UserPlus size={20} /> Добавить
+                      </motion.button>
                     )}
                   </div>
+                </div>
+              </div>
 
-                  {/* Profile Content Section */}
-                  <div className="px-6 sm:px-12 pb-12 relative">
-                    {/* Avatar & Actions Row */}
-                    <div className="flex flex-col sm:flex-row justify-between items-center sm:items-end -mt-20 sm:-mt-24 mb-8 gap-6">
-                      <div className="relative">
-                        <motion.div 
-                          initial={{ y: 20, opacity: 0 }}
-                          animate={{ y: 0, opacity: 1 }}
-                          className="w-36 h-36 sm:w-48 sm:h-48 rounded-[3rem] border-[8px] border-[#0A0A0F] bg-[#1A1B22] overflow-hidden shadow-2xl relative group/avatar"
-                        >
-                          <img src={viewingUserData.profileImage} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                          {(profileViewUserId === null || profileViewUserId === user?.uid) && (
-                            <label className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover/avatar:opacity-100 transition-all duration-300 cursor-pointer backdrop-blur-sm">
-                              <Camera size={32} className="text-white scale-90 group-hover/avatar:scale-100 transition-transform" />
-                              <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'profile')} />
-                            </label>
-                          )}
-                        </motion.div>
-                        {/* Online Status Indicator */}
-                        <div className="absolute bottom-4 right-4 w-6 h-6 bg-green-500 border-4 border-[#0A0A0F] rounded-full shadow-lg"></div>
-                      </div>
+              {/* Блок фотографий */}
+              <div className="w-full max-w-4xl mx-auto px-6 mb-10">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-[11px] font-black text-vk-text-muted uppercase tracking-[0.2em]">Фотографии</h3>
+                  <motion.span 
+                    whileHover={{ x: 3 }}
+                    className="text-[11px] font-bold text-[#120a8f] uppercase tracking-widest cursor-pointer hover:underline"
+                  >
+                    Показать все
+                  </motion.span>
+                </div>
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+                  {[1, 2, 3, 4, 5, 6].map((i) => (
+                    <motion.div 
+                      key={i} 
+                      whileHover={{ scale: 1.05, rotate: i % 2 === 0 ? 1 : -1 }}
+                      className="aspect-square rounded-2xl overflow-hidden cursor-pointer shadow-md border border-black/5"
+                    >
+                      <img src={`https://picsum.photos/seed/${viewingProfile.id}photo${i}/300/300`} alt={`Photo ${i}`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
 
-                      <div className="flex flex-wrap justify-center gap-3">
-                        {(profileViewUserId === null || profileViewUserId === user?.uid) ? (
-                          <>
-                            <button 
-                              onClick={() => {
-                                setEditForm({ 
-                                  name: currentUserData.name, username: currentUserData.username, location: currentUserData.location, status: currentUserData.status,
-                                  github: currentUserData.github || '', twitter: currentUserData.twitter || '', instagram: currentUserData.instagram || '', website: currentUserData.website || ''
-                                });
-                                setIsEditModalOpen(true);
-                              }} 
-                              disabled={currentUserData.isFrozen} 
-                              className="glass-button px-8 py-3 rounded-2xl font-bold flex items-center gap-2.5 transition-all hover:bg-white/10 active:scale-95 disabled:opacity-50"
-                            >
-                              <Settings size={18} className="text-indigo-400" /> 
-                              <span>Настройки</span>
-                            </button>
-                            {(currentUserData.isAdmin || user.email === 'alexeivasilev270819942@gmail.com') && (
-                              <button 
-                                onClick={() => setIsAdminPanelOpen(true)} 
-                                className="glass-button-primary px-8 py-3 rounded-2xl font-bold flex items-center gap-2.5 shadow-lg shadow-indigo-500/20 active:scale-95"
-                              >
-                                <Shield size={18} /> 
-                                <span>Админ Панель</span>
-                              </button>
-                            )}
-                          </>
-                        ) : (
-                          <>
-                            <button 
-                              onClick={() => handleStartChat(viewingUserData.id)} 
-                              className="glass-button-primary px-8 py-3 rounded-2xl font-bold flex items-center gap-2.5 shadow-lg shadow-indigo-500/20 active:scale-95"
-                            >
-                              <MessageCircle size={18} /> 
-                              <span>Сообщение</span>
-                            </button>
-                            {friends.some(f => (f.user1 === viewingUserData.id && f.user2 === user.uid) || (f.user2 === viewingUserData.id && f.user1 === user.uid)) ? (
-                              <button className="glass-button px-8 py-3 rounded-2xl font-bold flex items-center gap-2.5 opacity-60 cursor-default border-white/5">
-                                <UserCheck size={18} className="text-green-400" /> 
-                                <span>В друзьях</span>
-                              </button>
-                            ) : (
-                              <button 
-                                onClick={() => handleAddFriend(viewingUserData.id)} 
-                                className="glass-button px-8 py-3 rounded-2xl font-bold flex items-center gap-2.5 hover:bg-white/10 active:scale-95"
-                              >
-                                <UserPlus size={18} className="text-indigo-400" /> 
-                                <span>Добавить</span>
-                              </button>
-                            )}
-                            {follows.some(f => f.followerId === user.uid && f.followingId === viewingUserData.id) ? (
-                              <button 
-                                onClick={() => handleUnfollow(viewingUserData.id, 'user')} 
-                                className="glass-button px-8 py-3 rounded-2xl font-bold flex items-center gap-2.5 hover:bg-red-500/10 hover:text-red-400 border-red-500/20 active:scale-95"
-                              >
-                                <UserMinus size={18} /> 
-                                <span>Отписаться</span>
-                              </button>
-                            ) : (
-                              <button 
-                                onClick={() => handleFollow(viewingUserData.id, 'user')} 
-                                className="glass-button-primary px-8 py-3 rounded-2xl font-bold flex items-center gap-2.5 shadow-lg shadow-indigo-500/20 active:scale-95"
-                              >
-                                <UserPlus size={18} /> 
-                                <span>Подписаться</span>
-                              </button>
-                            )}
-                          </>
-                        )}
-                      </div>
+              {/* Стена публикаций */}
+              <div className="w-full max-w-4xl mx-auto flex flex-col px-6 mb-12 pb-20">
+                <h3 className="text-[11px] font-black text-vk-text-muted mb-4 uppercase tracking-[0.2em]">Стена публикаций</h3>
+                
+                <div className="space-y-6">
+                  {displayPosts.filter(p => p.authorId === viewingProfile.id).length === 0 ? (
+                    <div className="text-center py-10 text-vk-text-muted">
+                      <p className="text-sm font-medium">Нет записей</p>
                     </div>
+                  ) : (
+                    displayPosts
+                      .filter(p => p.authorId === viewingProfile.id)
+                      .map(post => (
+                        <PostItem key={post.id} post={post} onClick={() => setSelectedPost(post)} />
+                      ))
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        ) : activeTab === 'friends' ? (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex flex-col w-full h-full overflow-y-auto bg-vk-bg pb-20 px-4 pt-6 sm:px-8">
+            <div className="max-w-3xl mx-auto w-full">
+              <h2 className="text-2xl font-bold text-vk-text mb-6">Друзья</h2>
+              
+              {/* Навигация друзей */}
+              <div className="flex gap-2 mb-6 overflow-x-auto pb-2 scrollbar-hide">
+                <button 
+                  onClick={() => setFriendsTab('all')}
+                  className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-all ${friendsTab === 'all' ? 'bg-blue-600 text-white shadow-lg shadow-[#120a8f]/20' : 'bg-white text-vk-text hover:bg-black/5 border border-black/5'}`}
+                >
+                  Все друзья
+                </button>
+                <button 
+                  onClick={() => setFriendsTab('requests')}
+                  className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-all flex items-center gap-2 ${friendsTab === 'requests' ? 'bg-blue-600 text-white shadow-lg shadow-[#120a8f]/20' : 'bg-white text-vk-text hover:bg-black/5 border border-black/5'}`}
+                >
+                  Заявки {MOCK_INCOMING_REQUESTS.length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{MOCK_INCOMING_REQUESTS.length}</span>}
+                </button>
+                <button 
+                  onClick={() => setFriendsTab('add')}
+                  className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-all ${friendsTab === 'add' ? 'bg-blue-600 text-white shadow-lg shadow-[#120a8f]/20' : 'bg-white text-vk-text hover:bg-black/5 border border-black/5'}`}
+                >
+                  Поиск
+                </button>
+              </div>
 
-                    {/* User Info Section */}
-                    <div className="max-w-3xl">
-                      <div className="flex items-center gap-3 mb-2 flex-wrap">
-                        <h1 className="text-4xl sm:text-5xl font-black tracking-tighter flex flex-wrap items-center gap-3">
-                          <span className="text-gradient">{viewingUserData.name}</span>
-                          <div className="flex gap-2">
-                            {viewingUserData.isVerified && <BadgeCheck className="w-8 h-8 text-indigo-400 drop-shadow-[0_0_10px_rgba(129,140,248,0.5)]" />}
-                            {viewingUserData.isAdmin && <Shield className="w-8 h-8 text-purple-500 drop-shadow-[0_0_10px_rgba(168,85,247,0.5)]" />}
-                            {renderVipBadge(viewingUserData.vipStatus)}
-                          </div>
-                        </h1>
+              {friendsTab === 'all' && (
+                <div className="space-y-4">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-vk-text-muted" size={18} />
+                    <input 
+                      type="text" 
+                      placeholder="Поиск друзей" 
+                      value={friendsSearch}
+                      onChange={(e) => setFriendsSearch(e.target.value)}
+                      className="w-full bg-white border border-black/5 rounded-2xl py-3.5 pl-10 pr-4 text-vk-text placeholder-vk-text-muted focus:outline-none focus:ring-2 focus:ring-[#120a8f]/20 transition-all shadow-sm"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    {filteredFriends.length === 0 ? (
+                      <div className="text-center py-10 text-vk-text-muted">
+                        <p className="text-sm font-medium">У вас пока нет друзей</p>
                       </div>
-                      
-                      <p className="text-indigo-400/80 font-bold text-xl mb-6 tracking-tight">@{viewingUserData.username}</p>
-                      
-                      {viewingUserData.status && (
-                        <div className="relative mb-8">
-                          <div className="absolute -left-4 top-0 bottom-0 w-1 bg-gradient-to-b from-indigo-500/50 to-transparent rounded-full"></div>
-                          <p className="text-slate-300 font-medium text-lg leading-relaxed whitespace-pre-wrap break-words italic pl-2">
-                            "{viewingUserData.status}"
-                          </p>
+                    ) : (
+                      filteredFriends.map(friend => (
+                        <FriendItem 
+                          key={friend.id} 
+                          friend={friend} 
+                          onClick={() => setViewingProfile({ 
+                            id: friend.id, 
+                            name: friend.name, 
+                            avatar: friend.avatar, 
+                            isFriend: true, 
+                            isOnline: friend.isOnline, 
+                            lastSeen: friend.lastSeen, 
+                            about: 'Информация профиля...',
+                            isVerified: (friend as any).isVerified
+                          })} 
+                        />
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {friendsTab === 'requests' && (
+                <div className="space-y-6">
+                  {MOCK_INCOMING_REQUESTS.length === 0 && MOCK_OUTGOING_REQUESTS.length === 0 ? (
+                    <div className="text-center py-10 text-vk-text-muted">
+                      <p className="text-sm font-medium">Нет заявок в друзья</p>
+                    </div>
+                  ) : (
+                    <>
+                      {MOCK_INCOMING_REQUESTS.length > 0 && (
+                        <div>
+                          <h3 className="text-sm font-bold text-vk-text-muted uppercase tracking-wider mb-3">Входящие заявки</h3>
+                          <div className="space-y-2">
+                            {MOCK_INCOMING_REQUESTS.map(req => (
+                              <div key={req.id} className="bg-vk-panel border border-black/10 rounded-2xl p-4 flex items-center gap-4 shadow-sm">
+                                <div 
+                                  className="w-14 h-14 rounded-full overflow-hidden shrink-0 cursor-pointer"
+                                  onClick={() => setViewingProfile({ id: req.id, name: req.name, avatar: req.avatar, isFriend: false, isOnline: true, about: 'Информация профиля...' })}
+                                >
+                                  <img src={req.avatar} alt={req.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                </div>
+                                <div className="flex-1">
+                                  <h4 
+                                    className="text-base font-bold text-vk-text cursor-pointer hover:underline"
+                                    onClick={() => setViewingProfile({ id: req.id, name: req.name, avatar: req.avatar, isFriend: false, isOnline: true, about: 'Информация профиля...' })}
+                                  >
+                                    {req.name}
+                                  </h4>
+                                  <p className="text-sm text-vk-text-muted">{req.mutual} общих друзей</p>
+                                </div>
+                                <div className="flex gap-2">
+                                  <button className="w-10 h-10 rounded-full bg-vk-accent text-white flex items-center justify-center hover:opacity-90 transition-opacity">
+                                    <Check size={20} />
+                                  </button>
+                                  <button className="w-10 h-10 rounded-full bg-black/5 text-vk-text flex items-center justify-center hover:bg-black/10 transition-colors">
+                                    <X size={20} />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
 
-                      {/* Stats Grid */}
-                      <div className="grid grid-cols-3 gap-4 mb-8">
-                        <div className="glass-panel p-4 rounded-3xl text-center border-white/5 hover:bg-white/5 transition-colors">
-                          <div className="text-2xl font-black text-white">{posts.filter(p => p.userId === viewingUserData.id).length}</div>
-                          <div className="text-[10px] uppercase tracking-widest font-bold text-slate-500">Постов</div>
-                        </div>
-                        <div className="glass-panel p-4 rounded-3xl text-center border-white/5 hover:bg-white/5 transition-colors">
-                          <div className="text-2xl font-black text-white">{follows.filter(f => f.followingId === viewingUserData.id).length}</div>
-                          <div className="text-[10px] uppercase tracking-widest font-bold text-slate-500">Подписчиков</div>
-                        </div>
-                        <div className="glass-panel p-4 rounded-3xl text-center border-white/5 hover:bg-white/5 transition-colors">
-                          <div className="text-2xl font-black text-white">{follows.filter(f => f.followerId === viewingUserData.id).length}</div>
-                          <div className="text-[10px] uppercase tracking-widest font-bold text-slate-500">Подписок</div>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-4 text-sm text-slate-400 mb-8 font-bold">
-                        {viewingUserData.location && (
-                          <div className="flex items-center gap-2.5 bg-white/5 px-4 py-2 rounded-2xl border border-white/5">
-                            <MapPin size={16} className="text-indigo-400"/>
-                            <span>{viewingUserData.location}</span>
+                      {MOCK_OUTGOING_REQUESTS.length > 0 && (
+                        <div>
+                          <h3 className="text-sm font-bold text-vk-text-muted uppercase tracking-wider mb-3">Исходящие заявки</h3>
+                          <div className="space-y-2">
+                            {MOCK_OUTGOING_REQUESTS.map(req => (
+                              <div key={req.id} className="bg-vk-panel border border-black/10 rounded-2xl p-4 flex items-center gap-4 shadow-sm">
+                                <div className="w-14 h-14 rounded-full overflow-hidden shrink-0">
+                                  <img src={req.avatar} alt={req.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                </div>
+                                <div className="flex-1">
+                                  <h4 className="text-base font-bold text-vk-text">{req.name}</h4>
+                                  <p className="text-sm text-vk-text-muted">Подписаны</p>
+                                </div>
+                                <button className="px-4 py-2 rounded-full bg-black/5 text-vk-text text-sm font-medium hover:bg-black/10 transition-colors">
+                                  Отменить
+                                </button>
+                              </div>
+                            ))}
                           </div>
-                        )}
-                        {viewingUserData.createdAt && (
-                          <div className="flex items-center gap-2.5 bg-white/5 px-4 py-2 rounded-2xl border border-white/5">
-                            <Calendar size={16} className="text-indigo-400"/>
-                            <span>В Jagooars с {viewingUserData.createdAt.toDate().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}</span>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex gap-3">
-                        {viewingUserData.github && <a href={viewingUserData.github} target="_blank" rel="noreferrer" className="glass-icon-btn w-12 h-12 rounded-2xl"><Github size={20} /></a>}
-                        {viewingUserData.twitter && <a href={viewingUserData.twitter} target="_blank" rel="noreferrer" className="glass-icon-btn w-12 h-12 rounded-2xl"><Twitter size={20} /></a>}
-                        {viewingUserData.instagram && <a href={viewingUserData.instagram} target="_blank" rel="noreferrer" className="glass-icon-btn w-12 h-12 rounded-2xl"><Instagram size={20} /></a>}
-                        {viewingUserData.website && <a href={viewingUserData.website} target="_blank" rel="noreferrer" className="glass-icon-btn w-12 h-12 rounded-2xl"><Globe size={20} /></a>}
-                      </div>
-                    </div>
-                  </div>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
+              )}
 
-                {/* Posts Section */}
+              {friendsTab === 'add' && (
                 <div className="space-y-6">
-                  <div className="flex items-center justify-between px-2">
-                    <h2 className="text-3xl font-black text-white tracking-tight">Записи</h2>
-                    <div className="h-px flex-1 bg-gradient-to-r from-white/10 to-transparent ml-6"></div>
+                  <div className="relative flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-vk-text-muted" size={18} />
+                      <input 
+                        type="text" 
+                        placeholder="Имя или ID пользователя" 
+                        value={addFriendSearch}
+                        onChange={(e) => setAddFriendSearch(e.target.value)}
+                        className="w-full bg-vk-panel border border-black/10 rounded-xl py-3 pl-10 pr-4 text-vk-text placeholder-vk-text-muted focus:outline-none focus:border-vk-accent transition-colors"
+                      />
+                    </div>
+                    <button className="bg-vk-accent text-white px-6 py-3 rounded-xl font-medium hover:opacity-90 transition-opacity whitespace-nowrap">
+                      Найти
+                    </button>
                   </div>
-                  
-                  <div className="grid gap-6">
-                    {posts.filter(p => p.userId === viewingUserData.id).length === 0 ? (
-                      <div className="glass-panel py-24 rounded-[2.5rem] border-white/5 flex flex-col items-center justify-center text-center">
-                        <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-6">
-                          <MessageSquare size={32} className="text-slate-600" />
+
+                  <div>
+                    <h3 className="text-sm font-bold text-vk-text-muted uppercase tracking-wider mb-3">Возможно, вы знакомы</h3>
+                    <div className="space-y-2">
+                      {MOCK_RECOMMENDED.length === 0 ? (
+                        <div className="text-center py-10 text-vk-text-muted bg-white border border-black/5 rounded-2xl shadow-sm">
+                          <p className="text-sm font-medium">Нет рекомендаций</p>
                         </div>
-                        <p className="text-slate-500 font-bold text-sm uppercase tracking-[0.2em]">Здесь пока нет постов</p>
-                      </div>
-                    ) : (
-                        posts.filter(p => p.userId === viewingUserData.id).map(post => {
-                          const isLiked = post.likes?.includes(user?.uid);
-                          return (
-                            <motion.div 
-                              key={post.id} 
-                              initial={{ opacity: 0, y: 20 }}
-                              whileInView={{ opacity: 1, y: 0 }}
-                              viewport={{ once: true }}
-                              className="bento-card p-6 sm:p-8 group"
+                      ) : (
+                        MOCK_RECOMMENDED.map(rec => (
+                          <div key={rec.id} className="bg-vk-panel border border-black/10 rounded-2xl p-4 flex items-center gap-4 shadow-sm">
+                            <div 
+                              className="w-14 h-14 rounded-full overflow-hidden shrink-0 cursor-pointer"
+                              onClick={() => setViewingProfile({ id: rec.id, name: rec.name, avatar: rec.avatar, isFriend: false, isOnline: false, lastSeen: 'Был(а) недавно', about: 'Информация профиля...' })}
                             >
-                              <div className="flex justify-between items-start mb-6">
-                                <div className="flex gap-4 items-center">
-                                  <div className="relative">
-                                    <img src={viewingUserData.profileImage} alt="Author" className="w-14 h-14 rounded-2xl object-cover ring-2 ring-white/10 shadow-xl transition-transform group-hover:scale-105" />
-                                    <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 border-2 border-[#0A0A0F] rounded-full"></div>
-                                  </div>
-                                  <div>
-                                    <div className="font-black text-white flex items-center gap-2 text-lg tracking-tight">
-                                      {viewingUserData.name}
-                                      {viewingUserData.isVerified && <BadgeCheck size={18} className="text-indigo-400" />}
-                                      {viewingUserData.isAdmin && <Shield size={16} className="text-purple-500" />}
-                                      {renderVipBadge(viewingUserData.vipStatus)}
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-xs font-bold text-indigo-400/80 tracking-tight">@{viewingUserData.username}</span>
-                                      <span className="text-[10px] text-slate-600 font-black uppercase tracking-widest">• {formatTimeAgo(post.createdAt)}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                                {user.uid === post.userId && (
-                                  <button 
-                                    onClick={(e) => handleDeletePost(post.id, e)} 
-                                    className="p-2.5 rounded-xl bg-white/5 text-slate-500 hover:bg-red-500/10 hover:text-red-500 transition-all active:scale-90"
-                                  >
-                                    <Trash2 size={18} />
-                                  </button>
-                                )}
-                              </div>
-                              
-                              {post.text && <p className="text-slate-200 text-lg leading-relaxed mb-6 whitespace-pre-wrap font-medium break-words">{post.text}</p>}
-                              
-                              {post.image && (
-                                <div className="rounded-[2.5rem] overflow-hidden mb-6 border border-white/5 shadow-2xl relative group/img ring-1 ring-white/10">
-                                  <img src={post.image} alt="Post content" className="w-full h-auto object-cover max-h-[600px] transition-transform duration-700 group-hover/img:scale-105" />
-                                  <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover/img:opacity-100 transition-opacity"></div>
-                                </div>
-                              )}
-                              
-                              <div className="flex items-center gap-8 pt-6 border-t border-white/5">
-                                <button onClick={(e) => handleLikePost(post.id, e)} className={`flex items-center gap-3 transition-all group/btn ${post.likes?.includes(user.uid) ? 'text-rose-500' : 'text-slate-500 hover:text-rose-400'}`}>
-                                  <div className={`p-3 rounded-2xl transition-all duration-300 ${post.likes?.includes(user.uid) ? 'bg-rose-500/10 shadow-[0_0_15px_rgba(244,63,94,0.2)]' : 'bg-white/5 group-hover/btn:bg-rose-500/10'}`}>
-                                    <Heart size={20} fill={post.likes?.includes(user.uid) ? "currentColor" : "none"} className={post.likes?.includes(user.uid) ? 'scale-110' : 'group-hover/btn:scale-110 transition-transform'} />
-                                  </div>
-                                  <span className="font-black text-sm tracking-tighter">{post.likes?.length || 0}</span>
-                                </button>
-                                
-                                <button onClick={() => { setCommentingPostId(post.id); setIsCommentModalOpen(true); }} className="flex items-center gap-3 text-slate-500 hover:text-indigo-400 transition-all group/btn">
-                                  <div className="p-3 rounded-2xl bg-white/5 group-hover/btn:bg-indigo-500/10 transition-all duration-300">
-                                    <MessageCircle size={20} className="group-hover/btn:scale-110 transition-transform" />
-                                  </div>
-                                  <span className="font-black text-sm tracking-tighter">{post.comments?.length || 0}</span>
-                                </button>
-                                
-                                <button className="flex items-center gap-3 text-slate-500 hover:text-emerald-400 transition-all group/btn ml-auto">
-                                  <div className="p-3 rounded-2xl bg-white/5 group-hover/btn:bg-emerald-500/10 transition-all duration-300">
-                                    <Share2 size={20} className="group-hover/btn:scale-110 transition-transform" />
-                                  </div>
-                                </button>
-                              </div>
-                            </motion.div>
-                          );
-                        })
+                              <img src={rec.avatar} alt={rec.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            </div>
+                            <div className="flex-1">
+                              <h4 
+                                className="text-base font-bold text-vk-text cursor-pointer hover:underline"
+                                onClick={() => setViewingProfile({ id: rec.id, name: rec.name, avatar: rec.avatar, isFriend: false, isOnline: false, lastSeen: 'Был(а) недавно', about: 'Информация профиля...' })}
+                              >
+                                {rec.name}
+                              </h4>
+                              <p className="text-sm text-vk-text-muted">{rec.mutual} общих друзей</p>
+                            </div>
+                            <button className="w-10 h-10 rounded-full bg-vk-accent/10 text-vk-accent flex items-center justify-center hover:bg-vk-accent/20 transition-colors">
+                              <UserPlus size={20} />
+                            </button>
+                          </div>
+                        ))
                       )}
                     </div>
                   </div>
                 </div>
               )}
-
+            </div>
           </motion.div>
-        </AnimatePresence>
-      </main>
-
-      {/* Comment Modal */}
-      <AnimatePresence>
-        {isCommentModalOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => { setIsCommentModalOpen(false); setCommentingPostId(null); }}
-              className="absolute inset-0 bg-black/60 backdrop-blur-xl"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9, y: 40 }} 
-              animate={{ opacity: 1, scale: 1, y: 0 }} 
-              exit={{ opacity: 0, scale: 0.9, y: 40 }} 
-              className="glass-panel rounded-[3rem] w-full max-w-2xl overflow-hidden max-h-[85vh] flex flex-col shadow-[0_0_100px_rgba(0,0,0,0.5)] ring-1 ring-white/10 relative z-10"
-            >
-              <div className="flex justify-between items-center p-8 sm:p-10 pb-6 border-b border-white/5">
-                <div>
-                  <h2 className="text-3xl font-black tracking-tighter text-white mb-1">Комментарии</h2>
-                  <p className="text-slate-500 font-bold text-[10px] uppercase tracking-widest">Обсуждение публикации</p>
+        ) : activeTab === 'messages' ? (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex flex-col w-full h-full overflow-y-auto bg-vk-bg pb-20 px-4 pt-6 sm:px-8">
+            <div className="max-w-3xl mx-auto w-full">
+              <h2 className="text-2xl font-bold text-[#120a8f] mb-6">Сообщения</h2>
+              
+              {/* Gemini Bot Chat */}
+              <motion.div 
+                whileHover={{ scale: 1.01 }}
+                onClick={() => setActiveChat({ id: 'gemini_bot', name: 'Gemini AI', avatar: 'https://www.gstatic.com/lamda/images/gemini_sparkle_v002_d4735304ff6292a690345.svg', isOnline: true, isAI: true })}
+                className="bg-white border border-black/5 rounded-3xl p-4 flex items-center gap-4 shadow-sm hover:shadow-md transition-all cursor-pointer mb-4"
+              >
+                <div className="w-14 h-14 rounded-2xl bg-blue-600 flex items-center justify-center shrink-0 shadow-lg">
+                  <Aperture size={30} className="text-white animate-spin-slow" />
                 </div>
-                <button onClick={() => { setIsCommentModalOpen(false); setCommentingPostId(null); }} className="glass-icon-btn p-3 rounded-2xl text-slate-400 hover:text-white transition-all active:scale-90">
-                  <X size={24} />
+                <div className="flex-1 overflow-hidden">
+                  <div className="flex justify-between items-center mb-1">
+                    <h4 className="text-base font-bold text-vk-text truncate flex items-center gap-1">
+                      Gemini AI
+                      <Badge type="verified" size={14} />
+                    </h4>
+                    <span className="text-[10px] font-bold text-vk-accent uppercase tracking-wider shrink-0">AI Bot</span>
+                  </div>
+                  <p className="text-sm text-vk-text-muted truncate">Привет! Я Gemini AI. Чем могу помочь?</p>
+                </div>
+              </motion.div>
+
+              {/* Virtual Chats */}
+              <div className="space-y-2">
+                {displayChats.map((chat) => (
+                  <ChatItem 
+                    key={chat.id} 
+                    chat={chat} 
+                    onClick={() => {
+                      setActiveChat({ 
+                        id: chat.id, 
+                        name: chat.name, 
+                        avatar: chat.avatar, 
+                        isOnline: chat.isOnline, 
+                        isAI: chat.isAI,
+                        isVerified: (chat as any).isVerified,
+                        userTier: (chat as any).userTier
+                      });
+                      setChatMessages([
+                        { id: 1, type: 'date', text: 'Сегодня' },
+                        { id: 2, type: 'text', text: chat.lastMessage, sender: 'other', time: chat.time, status: 'read' }
+                      ]);
+                    }} 
+                  />
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        ) : activeTab === 'communities' ? (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex flex-col w-full h-full overflow-y-auto bg-vk-bg pb-20 px-4 pt-6 sm:px-8">
+            <div className="max-w-3xl mx-auto w-full">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-[#120a8f]">Хаб</h2>
+                <motion.button 
+                  whileHover={{ scale: 1.1, rotate: 90 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => hubView === 'communities' ? setIsCreatingCommunity(true) : setIsCreatingHubProfile(true)}
+                  className="w-10 h-10 rounded-full bg-[#120a8f]/10 text-[#120a8f] flex items-center justify-center hover:bg-[#120a8f]/20 transition-colors"
+                >
+                  <Plus size={20} />
+                </motion.button>
+              </div>
+
+              <div className="flex gap-2 mb-6 bg-black/5 p-1 rounded-2xl w-fit">
+                <button 
+                  onClick={() => setHubView('communities')}
+                  className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${hubView === 'communities' ? 'bg-white text-[#120a8f] shadow-sm' : 'text-vk-text-muted'}`}
+                >
+                  Сообщества
+                </button>
+                <button 
+                  onClick={() => setHubView('profiles')}
+                  className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${hubView === 'profiles' ? 'bg-white text-[#120a8f] shadow-sm' : 'text-vk-text-muted'}`}
+                >
+                  Профили
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto custom-scrollbar p-8 sm:p-10 space-y-8">
-                {posts.find(p => p.id === commentingPostId)?.comments?.length === 0 ? (
-                  <div className="py-20 flex flex-col items-center justify-center text-center opacity-50">
-                    <MessageCircle size={48} className="text-slate-600 mb-4" />
-                    <p className="text-slate-500 font-bold text-sm uppercase tracking-widest">Комментариев пока нет</p>
+              {hubView === 'communities' ? (
+                <>
+                  <div className="relative mb-6">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-vk-text-muted" size={18} />
+                    <input 
+                      type="text" 
+                      placeholder="Поиск сообществ" 
+                      value={communitiesSearch}
+                      onChange={(e) => setCommunitiesSearch(e.target.value)}
+                      className="w-full bg-white border border-black/5 rounded-2xl py-3.5 pl-10 pr-4 text-vk-text placeholder-vk-text-muted focus:outline-none focus:ring-2 focus:ring-[#120a8f]/20 transition-all shadow-sm"
+                    />
                   </div>
-                ) : (
-                  posts.find(p => p.id === commentingPostId)?.comments?.map((comment: any) => (
-                    <div key={comment.id} className="flex gap-4 group">
-                      <img src={comment.userAvatar} alt={comment.userName} className="w-12 h-12 rounded-2xl object-cover ring-2 ring-white/5" />
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-black text-white text-sm tracking-tight">{comment.userName}</span>
-                          <span className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">
-                            {formatTimeAgo({ toDate: () => new Date(comment.createdAt) } as any)}
-                          </span>
-                        </div>
-                        <p className="text-slate-300 text-sm leading-relaxed bg-white/5 p-4 rounded-2xl rounded-tl-none border border-white/5 group-hover:bg-white/10 transition-colors">
-                          {comment.text}
-                        </p>
+
+                  <div className="space-y-3">
+                    {filteredCommunities.length === 0 ? (
+                      <div className="text-center py-10 text-vk-text-muted">
+                        <p className="text-sm font-medium">Нет сообществ</p>
+                      </div>
+                    ) : (
+                      filteredCommunities.map(community => (
+                        <CommunityItem 
+                          key={community.id} 
+                          community={community} 
+                          onClick={() => {
+                            setActiveCommunity(community);
+                            setActiveChannel(MOCK_CHANNELS[0]);
+                            setCommunityView('chat');
+                          }} 
+                        />
+                      ))
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="relative mb-6">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-vk-text-muted" size={18} />
+                    <input 
+                      type="text" 
+                      placeholder="Поиск профилей" 
+                      value={hubSearch}
+                      onChange={(e) => setHubSearch(e.target.value)}
+                      className="w-full bg-white border border-black/5 rounded-2xl py-3.5 pl-10 pr-4 text-vk-text placeholder-vk-text-muted focus:outline-none focus:ring-2 focus:ring-[#120a8f]/20 transition-all shadow-sm"
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    {hubProfiles.filter(p => p.hubName.toLowerCase().includes(hubSearch.toLowerCase())).length === 0 && VIRTUAL_USERS.length === 0 ? (
+                      <div className="text-center py-10 text-vk-text-muted">
+                        <p className="text-sm font-medium">Профили не найдены</p>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Real Profiles */}
+                        {hubProfiles.filter(p => p.hubName.toLowerCase().includes(hubSearch.toLowerCase())).map(profile => (
+                          <div 
+                            key={profile.id} 
+                            onClick={() => setViewingProfile({ 
+                              id: profile.uid,
+                              name: profile.hubName,
+                              avatar: profile.photoURL,
+                              isFriend: false, 
+                              isOnline: true, 
+                              lastSeen: 'В сети', 
+                              about: profile.about || 'Пользователь хаба',
+                              specialization: profile.specialization,
+                              interests: profile.interests
+                            })}
+                            className="bg-white border border-black/5 rounded-3xl p-4 flex items-center gap-4 shadow-sm hover:shadow-md transition-all cursor-pointer"
+                          >
+                            <div className="w-14 h-14 rounded-2xl overflow-hidden shrink-0 shadow-sm">
+                              <img src={profile.photoURL} alt={profile.hubName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            </div>
+                            <div className="flex-1 overflow-hidden">
+                              <h4 className="text-base font-bold text-vk-text truncate">{profile.hubName}</h4>
+                              <p className="text-sm text-vk-text-muted truncate">{profile.specialization || 'Пользователь хаба'}</p>
+                            </div>
+                            <button className="w-10 h-10 rounded-full bg-vk-accent/10 text-vk-accent flex items-center justify-center hover:bg-vk-accent/20 transition-colors">
+                              <UserPlus size={20} />
+                            </button>
+                          </div>
+                        ))}
+                        
+                        {/* Virtual Users as placeholders if no real ones match or just to fill up */}
+                        {VIRTUAL_USERS.filter(u => u.name.toLowerCase().includes(hubSearch.toLowerCase())).map(user => (
+                          <div 
+                            key={user.id} 
+                            onClick={() => setViewingProfile({ ...user, isFriend: false, isOnline: true, lastSeen: 'В сети', about: 'Пользователь хаба' })}
+                            className="bg-white border border-black/5 rounded-3xl p-4 flex items-center gap-4 shadow-sm hover:shadow-md transition-all cursor-pointer opacity-70"
+                          >
+                            <div className="w-14 h-14 rounded-2xl overflow-hidden shrink-0 shadow-sm">
+                              <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            </div>
+                            <div className="flex-1 overflow-hidden">
+                              <h4 className="text-base font-bold text-vk-text truncate">{user.name}</h4>
+                              <p className="text-sm text-vk-text-muted truncate">Пользователь хаба (Виртуальный)</p>
+                            </div>
+                            <button className="w-10 h-10 rounded-full bg-vk-accent/10 text-vk-accent flex items-center justify-center hover:bg-vk-accent/20 transition-colors">
+                              <UserPlus size={20} />
+                            </button>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </motion.div>
+        ) : activeTab === 'home' ? (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex flex-col w-full h-full overflow-y-auto bg-vk-bg pb-20">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 bg-white/80  sticky top-0 z-20 border-b border-black/5">
+              <h1 className="text-xl font-bold text-[#120a8f]">Лента</h1>
+              <div className="flex items-center gap-3">
+                <button className="p-2 text-vk-text-muted hover:bg-black/5 rounded-full transition-colors"><Search size={22} /></button>
+                <button className="p-2 text-vk-text-muted hover:bg-black/5 rounded-full transition-colors"><Bell size={22} /></button>
+              </div>
+            </div>
+
+            {/* Stories */}
+            <div className="py-4 bg-white border-b border-black/5 mb-2">
+              <div className="flex gap-4 px-4 overflow-x-auto no-scrollbar">
+                {MOCK_STORIES.map(story => (
+                  <div key={story.id} className="flex flex-col items-center gap-1.5 shrink-0 cursor-pointer">
+                    <div className={`w-16 h-16 rounded-full p-[2px] ${story.hasUnseen ? 'bg-gradient-to-tr from-[#120a8f] to-purple-500' : 'bg-transparent'}`}>
+                      <div className="w-full h-full rounded-full border-2 border-white overflow-hidden relative bg-vk-panel">
+                        <img src={story.avatar} alt={story.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        {story.isAdd && (
+                          <div className="absolute inset-0 bg-black/30 flex items-center justify-center text-white">
+                            <Plus size={24} />
+                          </div>
+                        )}
                       </div>
                     </div>
-                  ))
-                )}
+                    <span className="text-[11px] font-medium text-vk-text truncate w-16 text-center">{story.name}</span>
+                  </div>
+                ))}
               </div>
+            </div>
 
-              <div className="p-8 sm:p-10 pt-6 bg-black/40 backdrop-blur-2xl border-t border-white/5">
-                <div className="relative group">
-                  <textarea 
-                    value={newCommentText}
-                    onChange={(e) => setNewCommentText(e.target.value)}
-                    placeholder="Напишите комментарий..."
-                    rows={2}
-                    className="w-full glass-input rounded-3xl pl-6 pr-20 py-5 text-white font-medium text-sm resize-none focus:ring-2 ring-indigo-500/50 transition-all placeholder:text-slate-700 leading-relaxed"
-                  />
-                  <button 
-                    onClick={handleCommentPost}
-                    disabled={!newCommentText.trim() || isCommenting}
-                    className="absolute right-4 bottom-4 p-4 rounded-2xl bg-indigo-500 text-white shadow-lg shadow-indigo-500/20 hover:bg-indigo-400 active:scale-90 transition-all disabled:opacity-50 disabled:scale-100"
-                  >
-                    {isCommenting ? (
-                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    ) : (
-                      <Send size={20} />
-                    )}
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Edit Profile Modal */}
-      <AnimatePresence>
-        {isEditModalOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsEditModalOpen(false)}
-              className="absolute inset-0 bg-black/60 backdrop-blur-xl"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9, y: 40 }} 
-              animate={{ opacity: 1, scale: 1, y: 0 }} 
-              exit={{ opacity: 0, scale: 0.9, y: 40 }} 
-              className="glass-panel rounded-[3rem] w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col shadow-[0_0_100px_rgba(0,0,0,0.5)] ring-1 ring-white/10 relative z-10"
-            >
-              <div className="flex justify-between items-center p-8 sm:p-12 pb-6">
-                <div>
-                  <h2 className="text-4xl font-black tracking-tighter text-white mb-2">Настройки профиля</h2>
-                  <p className="text-slate-500 font-bold text-xs uppercase tracking-widest">Персонализируйте свой аккаунт</p>
-                </div>
-                <button onClick={() => setIsEditModalOpen(false)} className="glass-icon-btn p-4 rounded-2xl text-slate-400 hover:text-white transition-all active:scale-90">
-                  <X size={24} />
+            {/* Create Post Area */}
+            <div className="px-4 mb-4 max-w-3xl mx-auto w-full">
+              <div className="flex flex-col bg-white border border-[#e1e4e8] rounded-xl p-3 transition-all duration-300 focus-within:border-[#0077ff] focus-within:shadow-[0_4px_12px_rgba(0,119,255,0.15)] shadow-sm">
+                <textarea 
+                  placeholder="Что у вас нового? (Создать публикацию)" 
+                  rows={1}
+                  value={newPostText}
+                  onChange={(e) => setNewPostText(e.target.value)}
+                  className="border-none outline-none text-base resize-none min-h-[40px] bg-transparent text-vk-text placeholder-vk-text-muted"
+                />
+                <button 
+                  onClick={async () => {
+                    if (newPostText.trim() && currentUser) {
+                      try {
+                        await addDoc(collection(db, 'posts'), {
+                          authorId: currentUser.uid,
+                          authorName: currentUser.displayName || 'Пользователь',
+                          authorPhoto: currentUser.photoURL || DEFAULT_AVATAR,
+                          authorIsVerified: isVerified,
+                          text: newPostText,
+                          createdAt: new Date().toISOString(),
+                          likes: 0,
+                          comments: 0,
+                          shares: 0,
+                          views: 1
+                        });
+                        setNewPostText('');
+                        toast.success('Пост опубликован!');
+                      } catch (error) {
+                        handleFirestoreError(error, OperationType.CREATE, 'posts');
+                      }
+                    }
+                  }}
+                  className="self-end bg-blue-600 text-white border-none px-6 py-2.5 rounded-full cursor-pointer mt-2.5 font-bold active:scale-95 transition-transform shadow-md hover:bg-blue-700 flex items-center gap-2"
+                >
+                  <Send size={18} />
+                  Опубликовать
                 </button>
               </div>
+            </div>
 
-              <div className="px-8 sm:px-12 py-0 space-y-10 overflow-y-auto custom-scrollbar flex-1">
-                {profileError && (
-                  <motion.div 
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="p-5 bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-bold rounded-2xl flex items-center gap-3"
-                  >
-                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                    {profileError}
-                  </motion.div>
-                )}
+            {/* Posts */}
+            <div className="flex flex-col gap-1 sm:px-4 max-w-3xl mx-auto w-full">
+              {displayPosts.length === 0 ? (
+                <div className="text-center py-10 text-vk-text-muted bg-white border border-black/5 rounded-2xl shadow-sm">
+                  <p className="text-sm font-medium">Нет записей</p>
+                </div>
+              ) : (
+                displayPosts.map(post => (
+                  <PostItem key={post.id} post={post} onClick={() => setSelectedPost(post)} />
+                ))
+              )}
+            </div>
+          </motion.div>
+        ) : activeTab === 'profile' ? (
+          <div className="flex-1 flex flex-col w-full h-full overflow-y-auto bg-vk-bg pb-20">
+            {isEditingProfile ? (
+              /* СОВРЕМЕННАЯ ФОРМА РЕДАКТИРОВАНИЯ */
+              <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="flex flex-col w-full h-full">
+                <div className="flex items-center px-4 py-4 bg-vk-bg/80  sticky top-0 z-20">
+                  <button onClick={() => setIsEditingProfile(false)} className="p-2 -ml-2 text-vk-text hover:bg-vk-panel rounded-full transition-colors">
+                    <ChevronLeft size={24} />
+                  </button>
+                  <h2 className="text-lg font-bold ml-2">Редактирование</h2>
+                </div>
 
-                <div className="space-y-8">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
-                    <div className="space-y-3">
-                      <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400/80 ml-1">Имя и фамилия</label>
-                      <input 
-                        type="text" 
-                        value={editForm.name} 
-                        onChange={e => setEditForm({...editForm, name: e.target.value})} 
-                        className="w-full glass-input rounded-2xl px-6 py-4 text-white font-bold text-lg focus:ring-2 ring-indigo-500/50 transition-all placeholder:text-slate-700"
-                        placeholder="Ваше имя"
-                      />
+                <div className="relative h-32 sm:h-48 w-full mb-12">
+                  <img src={DEFAULT_COVER} alt="Cover" className="absolute inset-0 w-full h-full object-cover opacity-70" referrerPolicy="no-referrer" />
+                  <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                    <button className="bg-black/50 text-white px-4 py-2 rounded-full flex items-center gap-2  hover:bg-black/60 transition-colors">
+                      <Camera size={18} />
+                      <span className="text-sm font-medium">Изменить обложку</span>
+                    </button>
+                  </div>
+                  <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center">
+                    <div className="relative group cursor-pointer">
+                      <div className="w-24 h-24 rounded-full bg-vk-panel border-4 border-vk-bg shadow-md overflow-hidden relative">
+                        <img src="https://picsum.photos/seed/user/200/200" alt="Avatar" className="w-full h-full object-cover opacity-60" referrerPolicy="no-referrer" />
+                        <div className="absolute inset-0 flex items-center justify-center text-white drop-shadow-md">
+                          <Camera size={24} />
+                        </div>
+                      </div>
                     </div>
-                    <div className="space-y-3">
-                      <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400/80 ml-1">Имя пользователя</label>
-                      <div className="relative">
-                        <span className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-500 font-black text-lg">@</span>
-                        <input 
-                          type="text" 
-                          value={editForm.username} 
-                          onChange={e => setEditForm({...editForm, username: e.target.value})} 
-                          className="w-full glass-input rounded-2xl pl-12 pr-6 py-4 text-white font-bold text-lg focus:ring-2 ring-indigo-500/50 transition-all placeholder:text-slate-700"
-                          placeholder="username"
+                  </div>
+                </div>
+
+                <div className="px-4 pb-8 max-w-md mx-auto w-full mt-4">
+                  <div className="space-y-6">
+                    {/* Блок: О себе */}
+                    <div className="bg-vk-panel rounded-3xl p-1.5 shadow-sm border border-vk-border/40">
+                      <div className="px-4 py-3">
+                        <label className="text-[11px] font-bold text-vk-text-muted uppercase tracking-wider">О себе</label>
+                      </div>
+                      <div className="px-2 pb-2">
+                        <textarea 
+                          placeholder="Расскажите немного о себе..." 
+                          rows={3}
+                          className="w-full bg-vk-bg border-none rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-vk-accent/50 text-sm font-medium transition-all resize-none"
+                          defaultValue="Создаю красивые интерфейсы и пишу чистый код. &#10;Всегда в поиске вдохновения! ✨"
                         />
                       </div>
                     </div>
-                  </div>
 
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400/80 ml-1">Местоположение</label>
-                    <div className="relative group">
-                      <MapPin className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-indigo-400 transition-colors" size={20} />
-                      <input 
-                        type="text" 
-                        value={editForm.location} 
-                        onChange={e => setEditForm({...editForm, location: e.target.value})} 
-                        className="w-full glass-input rounded-2xl pl-14 pr-6 py-4 text-white font-bold text-lg focus:ring-2 ring-indigo-500/50 transition-all placeholder:text-slate-700"
-                        placeholder="Город, Страна"
-                      />
+                    {/* Блок: Основное */}
+                    <div className="bg-vk-panel rounded-3xl p-1.5 shadow-sm border border-vk-border/40">
+                      <div className="px-4 py-3">
+                        <label className="text-[11px] font-bold text-vk-text-muted uppercase tracking-wider">Основное</label>
+                      </div>
+                      <div className="px-2 pb-2 space-y-2">
+                        <input type="text" placeholder="Имя и фамилия" className="w-full bg-vk-bg border-none rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-vk-accent/50 text-sm font-medium transition-all" />
+                        <select defaultValue="" className="w-full bg-vk-bg border-none rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-vk-accent/50 text-sm font-medium appearance-none text-vk-text transition-all">
+                          <option value="" disabled>Пол</option>
+                          <option value="male">Мужской</option>
+                          <option value="female">Женский</option>
+                        </select>
+                        <input type="text" placeholder="User ID" className="w-full bg-vk-bg border-none rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-vk-accent/50 text-sm font-medium transition-all" />
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400/80 ml-1">О себе</label>
-                    <textarea 
-                      value={editForm.status} 
-                      onChange={e => setEditForm({...editForm, status: e.target.value})} 
-                      rows={4} 
-                      className="w-full glass-input rounded-3xl px-6 py-5 text-white font-medium text-lg resize-none focus:ring-2 ring-indigo-500/50 transition-all placeholder:text-slate-700 leading-relaxed"
-                      placeholder="Расскажите немного о себе..."
-                    />
+                    {/* Блок: Контакты */}
+                    <div className="bg-vk-panel rounded-3xl p-1.5 shadow-sm border border-vk-border/40">
+                      <div className="px-4 py-3">
+                        <label className="text-[11px] font-bold text-vk-text-muted uppercase tracking-wider">Контакты</label>
+                      </div>
+                      <div className="px-2 pb-2 space-y-2">
+                        <div className="flex gap-2">
+                          <input type="text" placeholder="Страна" className="w-1/2 bg-vk-bg border-none rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-vk-accent/50 text-sm font-medium transition-all" />
+                          <input type="text" placeholder="Город" className="w-1/2 bg-vk-bg border-none rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-vk-accent/50 text-sm font-medium transition-all" />
+                        </div>
+                        <input type="email" placeholder="Email адрес" className="w-full bg-vk-bg border-none rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-vk-accent/50 text-sm font-medium transition-all" />
+                      </div>
+                    </div>
+
+                    <button 
+                      onClick={() => setIsEditingProfile(false)} 
+                      className="w-full bg-vk-accent text-white font-bold rounded-2xl px-4 py-4 mt-4 shadow-lg shadow-vk-accent/20 hover:opacity-90 active:scale-[0.98] transition-all"
+                    >
+                      Сохранить изменения
+                    </button>
                   </div>
+                </div>
+              </motion.div>
+            ) : (
+              /* СОВРЕМЕННЫЙ ВИД ПРОФИЛЯ */
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col w-full">
+                {/* Обложка и шапка */}
+                <div className="relative h-48 sm:h-64 w-full overflow-hidden">
+                  <img 
+                    src={DEFAULT_COVER} 
+                    alt="Cover" 
+                    className="absolute inset-0 w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="absolute inset-0 bg-blue-600"></div>
                   
-                  <div className="pt-4 space-y-6">
-                    <div className="flex items-center gap-4">
-                      <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400">Социальные сети</h3>
-                      <div className="h-px flex-1 bg-gradient-to-r from-indigo-500/20 to-transparent"></div>
+                  <div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-start z-10">
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <motion.div 
+                          whileHover={{ scale: 1.05 }}
+                          className="bg-white/20  px-3 py-1.5 rounded-2xl flex items-center gap-2 border border-white/10 shadow-lg"
+                        >
+                          <Award size={14} className="text-yellow-400" />
+                          <span className="text-white text-xs font-bold uppercase tracking-wider">Online</span>
+                        </motion.div>
+                      </div>
+                      
+                      {isAdmin && (
+                        <motion.button 
+                          whileHover={{ scale: 1.05, backgroundColor: 'rgba(255, 255, 255, 0.2)' }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => setIsAdminPanelOpen(true)} 
+                          className="px-4 py-2 text-white bg-white/10  border border-white/20 rounded-2xl text-xs font-bold flex items-center gap-2 shadow-lg transition-all"
+                        >
+                          <Shield size={16} />
+                          Админ-панель
+                        </motion.button>
+                      )}
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                      <div className="relative group">
-                        <div className="absolute left-5 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center text-slate-500 group-focus-within:text-white group-focus-within:bg-indigo-500/20 transition-all">
-                          <Github size={20} />
-                        </div>
-                        <input type="text" placeholder="GitHub URL" value={editForm.github} onChange={e => setEditForm({...editForm, github: e.target.value})} className="w-full glass-input rounded-2xl pl-18 pr-6 py-4 text-white font-bold transition-all placeholder:text-slate-700" />
-                      </div>
-                      <div className="relative group">
-                        <div className="absolute left-5 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center text-slate-500 group-focus-within:text-white group-focus-within:bg-indigo-500/20 transition-all">
-                          <Twitter size={20} />
-                        </div>
-                        <input type="text" placeholder="Twitter URL" value={editForm.twitter} onChange={e => setEditForm({...editForm, twitter: e.target.value})} className="w-full glass-input rounded-2xl pl-18 pr-6 py-4 text-white font-bold transition-all placeholder:text-slate-700" />
-                      </div>
-                      <div className="relative group">
-                        <div className="absolute left-5 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center text-slate-500 group-focus-within:text-white group-focus-within:bg-indigo-500/20 transition-all">
-                          <Instagram size={20} />
-                        </div>
-                        <input type="text" placeholder="Instagram URL" value={editForm.instagram} onChange={e => setEditForm({...editForm, instagram: e.target.value})} className="w-full glass-input rounded-2xl pl-18 pr-6 py-4 text-white font-bold transition-all placeholder:text-slate-700" />
-                      </div>
-                      <div className="relative group">
-                        <div className="absolute left-5 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center text-slate-500 group-focus-within:text-white group-focus-within:bg-indigo-500/20 transition-all">
-                          <Globe size={20} />
-                        </div>
-                        <input type="text" placeholder="Website URL" value={editForm.website} onChange={e => setEditForm({...editForm, website: e.target.value})} className="w-full glass-input rounded-2xl pl-18 pr-6 py-4 text-white font-bold transition-all placeholder:text-slate-700" />
-                      </div>
+
+                    <div className="flex items-center gap-2 relative">
+                      <motion.button 
+                        whileHover={{ scale: 1.1, rotate: 15 }}
+                        whileTap={{ scale: 0.9 }}
+                        onClick={() => setIsSettingsOpen(!isSettingsOpen)} 
+                        className="w-10 h-10 text-white bg-white/10  border border-white/20 rounded-full flex items-center justify-center shadow-lg transition-all"
+                      >
+                        <Settings size={22} />
+                      </motion.button>
+                      
+                      {/* Выпадающее меню настроек */}
+                      {isSettingsOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setIsSettingsOpen(false)} />
+                          <motion.div 
+                            initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            className="absolute right-0 mt-2 w-48 bg-white border border-black/5 rounded-3xl shadow-2xl py-2 z-50 overflow-hidden"
+                          >
+                            <button 
+                              onClick={async () => {
+                                setIsSettingsOpen(false);
+                                await signOut(auth);
+                                setActiveTab('home');
+                              }} 
+                              className="w-full flex items-center gap-3 px-4 py-3 text-red-500 hover:bg-red-50 transition-colors text-sm font-bold outline-none"
+                            >
+                              <LogOut size={18} />
+                              Выйти из аккаунта
+                            </button>
+                          </motion.div>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="p-8 sm:p-12 pt-6 flex flex-col sm:flex-row justify-end gap-4 bg-black/40 backdrop-blur-2xl border-t border-white/5">
-                <button 
-                  onClick={() => setIsEditModalOpen(false)} 
-                  className="glass-button px-10 py-5 rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all order-2 sm:order-1"
-                >
-                  Отмена
-                </button>
-                <button 
-                  onClick={handleSaveProfile} 
-                  disabled={isSaving} 
-                  className="glass-button-primary px-12 py-5 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50 shadow-2xl shadow-indigo-500/20 active:scale-95 transition-all order-1 sm:order-2 flex items-center justify-center gap-3"
-                >
-                  {isSaving ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      <span>Сохранение</span>
-                    </>
-                  ) : (
-                    <>
-                      <Save size={18} />
-                      <span>Сохранить</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </motion.div>
+                {/* Информация пользователя */}
+                <div className="px-4 relative max-w-md mx-auto w-full">
+                  <div className="flex flex-col items-center -mt-20 sm:-mt-24 mb-8">
+                    <motion.div 
+                      className="relative mb-4"
+                      animate={{ y: [0, -8, 0] }}
+                      transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
+                    >
+                      <div className="w-36 h-36 sm:w-40 sm:h-40 rounded-3xl border-[4px] border-white bg-white overflow-hidden shadow-2xl relative">
+                        <img src={currentUser?.photoURL || DEFAULT_AVATAR} alt="Avatar" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        <div className="absolute inset-0 ring-1 ring-black/5 rounded-3xl" />
+                      </div>
+                      <div className="absolute bottom-1 right-1 sm:bottom-2 sm:right-2 w-8 h-8 sm:w-9 sm:h-9 bg-green-500 rounded-full border-[4px] border-white shadow-lg" />
+                    </motion.div>
+
+                    <div className="text-center mb-5">
+                      <h2 className="text-3xl font-extrabold leading-tight tracking-tight text-vk-text flex flex-col items-center gap-2">
+                        <div className="flex items-center gap-2">
+                          {currentUser?.displayName || 'Имя Пользователя'}
+                          <Badge type="verified" size={24} />
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {isAdmin && (
+                            <>
+                              <Badge type="creator" size={20} />
+                              <Badge type="admin" size={20} />
+                            </>
+                          )}
+                        </div>
+                      </h2>
+                      <div className="flex items-center justify-center gap-1.5 mt-1 mb-3">
+                        <span className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse"></span>
+                        <span className="text-sm font-medium text-green-600">В сети</span>
+                      </div>
+                      
+                      {/* Прогресс уровня удален */}
+
+                      <p className="text-vk-text-muted text-sm font-medium">@username • Москва, Россия</p>
+                    </div>
+
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.2, duration: 0.5 }}
+                      className="text-center px-4 mb-6 text-sm text-vk-text leading-relaxed italic"
+                    >
+                      "Создаю красивые интерфейсы и пишу чистый код. <br/> Всегда в поиске вдохновения! ✨"
+                    </motion.div>
+
+                    <div className="flex flex-wrap justify-center gap-2 mb-6">
+                      <span className="bg-vk-accent/10 text-vk-accent px-3 py-1 rounded-full text-sm font-medium cursor-pointer hover:bg-vk-accent/20 transition-colors">Программирование</span>
+                      <span className="bg-vk-accent/10 text-vk-accent px-3 py-1 rounded-full text-sm font-medium cursor-pointer hover:bg-vk-accent/20 transition-colors">Технологии</span>
+                      <span className="bg-vk-accent/10 text-vk-accent px-3 py-1 rounded-full text-sm font-medium cursor-pointer hover:bg-vk-accent/20 transition-colors">Игры</span>
+                    </div>
+
+                    <button 
+                      onClick={() => setIsEditingProfile(true)}
+                      className="bg-vk-panel border border-black/10 text-vk-text px-8 py-3 rounded-full font-semibold text-base shadow-lg hover:bg-black/5 active:scale-95 transition-all "
+                    >
+                      Редактировать профиль
+                    </button>
+                  </div>
+                </div>
+
+                {/* Блок фотографий */}
+                <div className="w-full max-w-3xl mx-auto px-4 sm:px-4 mb-8">
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="text-[13px] font-bold text-vk-text-muted uppercase tracking-wider">Мои фотографии</h3>
+                    <span className="text-sm text-vk-accent cursor-pointer hover:underline">Добавить</span>
+                  </div>
+                  <div className="text-center py-6 text-vk-text-muted bg-white border border-black/5 rounded-2xl shadow-sm">
+                    <p className="text-sm font-medium">Нет фотографий</p>
+                  </div>
+                </div>
+
+                {/* Стена публикаций на всю ширину */}
+                <div className="w-full max-w-3xl mx-auto flex flex-col sm:px-4 mb-8 pb-20">
+                  <h3 className="text-[11px] font-bold text-vk-text-muted mb-2 mt-2 uppercase tracking-wider px-5 sm:px-1">Стена</h3>
+                  
+                  <div className="bg-vk-panel border-y border-black/10 sm:border sm:rounded-2xl shadow-lg  flex flex-col divide-y divide-black/10">
+                    {/* Создание записи */}
+                    <div className="p-4 flex flex-col gap-3">
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-full overflow-hidden shrink-0">
+                          <img src={currentUser?.photoURL || DEFAULT_AVATAR} alt="Avatar" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        </div>
+                        <div className="flex-1 flex flex-col gap-2">
+                          <textarea 
+                            placeholder="Что у вас нового?"
+                            value={newPostText}
+                            onChange={(e) => setNewPostText(e.target.value)}
+                            className="w-full bg-transparent border-none outline-none resize-none min-h-[40px] pt-2 text-vk-text placeholder-vk-text-muted"
+                            rows={newPostText.trim() || newPostImage ? 3 : 1}
+                          />
+                          
+                          {newPostImage && (
+                            <div className="relative w-full max-h-[300px] rounded-2xl overflow-hidden border border-black/5 group">
+                              <img src={newPostImage} alt="Preview" className="w-full h-full object-cover" />
+                              <button 
+                                onClick={() => setNewPostImage(null)}
+                                className="absolute top-2 right-2 p-1.5 bg-black/50 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <X size={16} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between pt-2">
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            ref={postImageInputRef}
+                            onChange={(e) => handleFileSelect(e, setNewPostImage)}
+                          />
+                          <button 
+                            onClick={() => postImageInputRef.current?.click()}
+                            className={`p-2 rounded-xl transition-colors ${newPostImage ? 'bg-vk-accent/10 text-vk-accent' : 'text-vk-text-muted hover:bg-black/5'}`}
+                            title="Добавить фото"
+                          >
+                            <ImageIcon size={20} />
+                          </button>
+                        </div>
+                        {(newPostText.trim() || newPostImage) && (
+                          <button 
+                            onClick={async () => {
+                              if ((newPostText.trim() || newPostImage) && currentUser) {
+                                try {
+                                  await addDoc(collection(db, 'posts'), {
+                                    authorId: currentUser.uid,
+                                    authorName: currentUser.displayName || 'Пользователь',
+                                    authorPhoto: currentUser.photoURL || DEFAULT_AVATAR,
+                                    authorIsVerified: isVerified,
+                                    text: newPostText,
+                                    image: newPostImage,
+                                    createdAt: new Date().toISOString(),
+                                    likes: 0,
+                                    comments: 0,
+                                    shares: 0,
+                                    views: 1
+                                  });
+                                  setNewPostText('');
+                                  setNewPostImage(null);
+                                  toast.success('Пост опубликован!');
+                                } catch (error) {
+                                  handleFirestoreError(error, OperationType.CREATE, 'posts');
+                                }
+                              }
+                            }}
+                            className="bg-vk-accent text-white px-6 py-2 rounded-full font-medium text-sm hover:bg-vk-accent/90 active:scale-95 transition-all flex items-center gap-2"
+                          >
+                            <Send size={16} />
+                            Опубликовать
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Posts List */}
+                    <div className="flex flex-col divide-y divide-black/5">
+                      {displayPosts.filter(p => p.authorId === currentUser.uid).length === 0 ? (
+                        <div className="text-center py-10 text-vk-text-muted">
+                          <p className="text-sm font-medium">Нет записей</p>
+                        </div>
+                      ) : (
+                        displayPosts
+                          .filter(p => p.authorId === currentUser.uid)
+                          .map(post => (
+                            <PostItem key={post.id} post={post} onClick={() => setSelectedPost(post)} />
+                          ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
           </div>
+        ) : null}
+      </div>
+
+      {/* Post Details Modal */}
+      {selectedPost && (
+        <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="fixed inset-0 bg-vk-bg z-50 flex flex-col">
+          <div className="flex items-center px-4 py-3 bg-vk-panel/80  sticky top-0 z-20 border-b border-black/5">
+            <button onClick={() => setSelectedPost(null)} className="p-2 -ml-2 text-vk-text hover:bg-black/5 rounded-full transition-colors">
+              <ChevronLeft size={24} />
+            </button>
+            <h2 className="text-lg font-bold ml-2">Запись</h2>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto pb-20">
+            <div className="bg-vk-panel border-b border-black/10">
+              <div className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full overflow-hidden">
+                      <img src={selectedPost.author.avatar} alt="Avatar" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-vk-text">{selectedPost.author.name}</h4>
+                      <p className="text-xs text-vk-text-muted">{selectedPost.time}</p>
+                    </div>
+                  </div>
+                  <button className="text-vk-text-muted hover:text-vk-text p-1">
+                    <MoreHorizontal size={18} />
+                  </button>
+                </div>
+                <div className="text-base text-vk-text mb-3 leading-relaxed">
+                  {selectedPost.text}
+                </div>
+                {selectedPost.image && (
+                  <div className="rounded-xl overflow-hidden mb-3 border border-black/5 -mx-4 sm:mx-0 sm:rounded-xl">
+                    <img src={selectedPost.image} alt="Post content" className="w-full h-auto object-cover" referrerPolicy="no-referrer" />
+                  </div>
+                )}
+                <div className="flex items-center gap-4 pt-2 border-t border-black/5 mt-4">
+                  <button className="flex items-center gap-1.5 text-vk-text-muted hover:text-red-400 transition-colors bg-black/5 px-3 py-1.5 rounded-full">
+                    <Heart size={18} />
+                    <span className="text-xs font-medium">{selectedPost.likes}</span>
+                  </button>
+                  <button className="flex items-center gap-1.5 text-vk-text-muted hover:text-blue-400 transition-colors bg-black/5 px-3 py-1.5 rounded-full">
+                    <MessageCircle size={18} />
+                    <span className="text-xs font-medium">{selectedPost.comments}</span>
+                  </button>
+                  <button className="flex items-center gap-1.5 text-vk-text-muted hover:text-green-400 transition-colors bg-black/5 px-3 py-1.5 rounded-full ml-auto">
+                    <Share2 size={18} />
+                    <span className="text-xs font-medium">{selectedPost.shares}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-vk-panel mt-2 p-4 min-h-screen">
+              <h3 className="font-bold text-vk-text mb-4">Комментарии ({selectedPost.comments})</h3>
+              <div className="flex flex-col gap-5">
+                {MOCK_COMMENTS.map(c => (
+                  <div key={c.id} className="flex gap-3">
+                    <img src={c.avatar} className="w-8 h-8 rounded-full shrink-0" referrerPolicy="no-referrer" />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm text-vk-text">{c.author}</span>
+                        <span className="text-xs text-vk-text-muted">{c.time}</span>
+                      </div>
+                      <p className="text-sm text-vk-text mt-0.5">{c.text}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="fixed bottom-0 left-0 right-0 bg-vk-panel border-t border-black/10 p-3 flex items-center gap-3 pb-safe z-30">
+            <img src={DEFAULT_AVATAR} className="w-8 h-8 rounded-full shrink-0" referrerPolicy="no-referrer" />
+            <input type="text" placeholder="Написать комментарий..." className="flex-1 bg-black/5 rounded-full px-4 py-2 text-sm outline-none focus:ring-1 focus:ring-vk-accent/50 transition-all" />
+            <button className="text-vk-accent p-2 hover:bg-vk-accent/10 rounded-full transition-colors">
+              <Send size={20} />
+            </button>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Chat View Overlay */}
+      <AnimatePresence>
+        {activeChat && (
+          <motion.div 
+            key="chat-view"
+            initial={{ x: '100%' }} 
+            animate={{ x: 0 }} 
+            exit={{ x: '100%' }} 
+            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            className="fixed inset-0 z-50 bg-vk-bg flex flex-col"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-4 bg-white/90  border-b border-black/5 z-20 shadow-sm">
+              <div className="flex items-center gap-3">
+                <motion.button 
+                  whileHover={{ scale: 1.1, x: -2 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => setActiveChat(null)} 
+                  className="p-2 -ml-2 text-vk-text hover:bg-black/5 rounded-full transition-colors"
+                >
+                  <ChevronLeft size={24} />
+                </motion.button>
+                <div 
+                  className="flex items-center gap-3 cursor-pointer" 
+                  onClick={() => {
+                    setActiveChat(null);
+                    setViewingProfile({ 
+                      id: activeChat.id, 
+                      name: activeChat.name, 
+                      avatar: activeChat.avatar, 
+                      isFriend: true, 
+                      isOnline: activeChat.isOnline, 
+                      about: 'Информация профиля...',
+                      isAI: activeChat.isAI,
+                      isVerified: activeChat.isVerified,
+                      isAdmin: activeChat.isAdmin,
+                      isCreator: activeChat.isCreator
+                    });
+                  }}
+                >
+                  <div className="relative w-11 h-11 rounded-2xl overflow-hidden shrink-0 shadow-sm">
+                    <img src={activeChat.avatar} alt={activeChat.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    {activeChat.isOnline && <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-white" />}
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-vk-text text-base leading-tight flex items-center gap-1">
+                      {activeChat.name}
+                      <div className="flex items-center gap-0.5">
+                        {activeChat.isCreator && <Badge type="creator" size={14} />}
+                        {activeChat.isAdmin && <Badge type="admin" size={14} />}
+                        {activeChat.isVerified && <Badge type="verified" size={14} />}
+                      </div>
+                    </h3>
+                    <p className="text-[10px] font-bold text-vk-accent uppercase tracking-wider animate-pulse">печатает...</p>
+                  </div>
+                </div>
+              </div>
+              <motion.button 
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+                className="p-2 text-vk-text-muted hover:text-vk-text hover:bg-black/5 rounded-full transition-colors"
+              >
+                <MoreVertical size={20} />
+              </motion.button>
+            </div>
+
+            {/* Messages Area */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-vk-bg relative" onClick={() => setSelectedMessageId(null)}>
+              {(activeChat?.id === 'gemini_bot' ? geminiMessages : chatMessages).map(msg => {
+                if (msg.type === 'date') {
+                  return (
+                    <div key={msg.id} className="flex justify-center my-4">
+                      <span className="bg-white/50  text-vk-text-muted text-[10px] font-bold uppercase tracking-wider px-4 py-1.5 rounded-full shadow-sm">
+                        {msg.text}
+                      </span>
+                    </div>
+                  );
+                }
+
+                const isMe = msg.sender === 'me';
+                
+                return (
+                  <motion.div 
+                    key={msg.id}
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div className="relative group max-w-[80%] sm:max-w-[70%]">
+                      <div 
+                        onClick={(e) => { e.stopPropagation(); setSelectedMessageId(selectedMessageId === msg.id ? null : msg.id); }}
+                        className={`p-4 shadow-sm cursor-pointer transition-transform active:scale-[0.98] ${
+                          isMe 
+                            ? 'bg-blue-600 text-white rounded-3xl rounded-br-sm' 
+                            : 'bg-white border border-black/5 text-vk-text rounded-3xl rounded-bl-sm'
+                        }`}
+                      >
+                        {msg.type === 'text' && (
+                          <p className="text-sm break-words whitespace-pre-wrap leading-relaxed font-medium">{msg.text}</p>
+                        )}
+                        {msg.type === 'image' && (
+                          <div className="rounded-2xl overflow-hidden -mx-1 -mt-1 mb-1 shadow-sm">
+                            <img src={msg.url} alt="Attachment" className="w-full h-auto object-cover" referrerPolicy="no-referrer" />
+                          </div>
+                        )}
+                        {msg.type === 'voice' && (
+                          <div className="flex items-center gap-3 min-w-[180px]">
+                            <button className={`w-11 h-11 rounded-full flex items-center justify-center shrink-0 shadow-sm ${isMe ? 'bg-white/20 text-white' : 'bg-[#120a8f]/10 text-[#120a8f]'}`}>
+                              <Play size={20} className="ml-1" />
+                            </button>
+                            <div className="flex-1 h-1.5 bg-black/10 rounded-full overflow-hidden relative">
+                              <div className={`absolute left-0 top-0 bottom-0 w-1/3 rounded-full ${isMe ? 'bg-white' : 'bg-[#120a8f]'}`} />
+                            </div>
+                            <span className={`text-[10px] font-bold ${isMe ? 'text-white/80' : 'text-vk-text-muted'}`}>{msg.duration}</span>
+                          </div>
+                        )}
+                        
+                        <div className={`flex items-center justify-end gap-1 mt-2 ${isMe ? 'text-white/70' : 'text-vk-text-muted'}`}>
+                          <span className="text-[10px] font-bold uppercase tracking-wider">{msg.time}</span>
+                          {isMe && (
+                            msg.status === 'read' ? <CheckCheck size={14} /> : <Check size={14} />
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Context Menu */}
+                      <AnimatePresence>
+                        {selectedMessageId === msg.id && (
+                          <motion.div 
+                            initial={{ opacity: 0, scale: 0.9, y: isMe ? -10 : 10 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.9, y: isMe ? -10 : 10 }}
+                            className={`absolute ${isMe ? 'top-full right-0 mt-2' : 'bottom-full left-0 mb-2'} bg-white border border-black/5 shadow-2xl rounded-3xl p-2 z-30 flex flex-col min-w-[160px] `}
+                          >
+                            <button className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-vk-text hover:bg-black/5 rounded-2xl transition-colors">
+                              <Copy size={18} className="text-vk-text-muted" /> Копировать
+                            </button>
+                            <button className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-vk-text hover:bg-black/5 rounded-2xl transition-colors">
+                              <Reply size={18} className="text-vk-text-muted" /> Ответить
+                            </button>
+                            <div className="h-px bg-black/5 my-1.5 mx-3" />
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); handleDeleteMessage(msg.id); }} 
+                              className="flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                            >
+                              <Trash2 size={16} /> Удалить
+                            </button>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </motion.div>
+                );
+              })}
+              {isGeminiTyping && activeChat?.isAI && (
+                <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="flex justify-start mb-4">
+                  <div className="bg-vk-panel border border-black/5 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm flex items-center gap-2">
+                    <div className="w-2 h-2 bg-vk-accent/60 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <div className="w-2 h-2 bg-vk-accent/60 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <div className="w-2 h-2 bg-vk-accent/60 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                </motion.div>
+              )}
+              <div ref={messagesEndRef} className="h-4" />
+            </div>
+
+            {/* Input Area */}
+            <div className="p-3 bg-vk-panel/90  border-t border-black/5 z-20">
+              <div className="flex items-end gap-2 max-w-4xl mx-auto w-full">
+                <button className="p-2.5 text-vk-text-muted hover:text-vk-text hover:bg-black/5 rounded-full transition-colors shrink-0">
+                  <Paperclip size={22} />
+                </button>
+                
+                <div className="flex-1 bg-black/5 border border-black/5 rounded-2xl flex items-end relative transition-colors focus-within:bg-white focus-within:border-vk-accent/30 focus-within:shadow-sm">
+                  <textarea 
+                    value={newChatMessage} 
+                    onChange={e => setNewChatMessage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendMessage();
+                      }
+                    }}
+                    placeholder="Сообщение..." 
+                    className="w-full bg-transparent border-none focus:ring-0 resize-none max-h-32 min-h-[44px] py-3 px-4 text-sm text-vk-text placeholder-vk-text-muted"
+                    rows={1}
+                  />
+                  <button className="p-2.5 text-vk-text-muted hover:text-vk-text transition-colors shrink-0 mb-0.5 mr-0.5">
+                    <Smile size={22} />
+                  </button>
+                </div>
+
+                {newChatMessage.trim() ? (
+                  <motion.button 
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    whileTap={{ scale: 0.9 }} 
+                    onClick={handleSendMessage} 
+                    className="w-11 h-11 bg-vk-accent text-white rounded-full shadow-md flex items-center justify-center shrink-0 hover:opacity-90 transition-opacity"
+                  >
+                    <Send size={20} className="ml-1" />
+                  </motion.button>
+                ) : (
+                  <button className="w-11 h-11 text-vk-text-muted hover:text-vk-text hover:bg-black/5 rounded-full flex items-center justify-center transition-colors shrink-0">
+                    <Mic size={22} />
+                  </button>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Community View Overlay */}
+      <AnimatePresence>
+        {activeCommunity && (
+          <motion.div 
+            key="community-view"
+            initial={{ x: '100%' }} 
+            animate={{ x: 0 }} 
+            exit={{ x: '100%' }} 
+            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            className="fixed inset-0 z-50 bg-vk-bg flex flex-col"
+          >
+            {/* Header with Cover */}
+            <div className="relative h-40 sm:h-48 shrink-0">
+              <img src={activeCommunity.cover} className="absolute inset-0 w-full h-full object-cover" referrerPolicy="no-referrer" />
+              <div className="absolute inset-0 bg-blue-600" />
+              <div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-center z-10">
+                <motion.button 
+                  whileHover={{ scale: 1.1, x: -2 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => setActiveCommunity(null)} 
+                  className="p-2.5 text-white hover:bg-white/20 rounded-full  transition-colors shadow-lg"
+                >
+                  <ChevronLeft size={24} />
+                </motion.button>
+                <motion.button 
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => setIsCommunitySettingsOpen(true)} 
+                  className="p-2.5 text-white hover:bg-white/20 rounded-full  transition-colors shadow-lg"
+                >
+                  <MoreVertical size={24} />
+                </motion.button>
+              </div>
+              <div className="absolute -bottom-10 left-6 flex items-end gap-4 z-10">
+                <motion.div 
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="w-24 h-24 rounded-3xl border-4 border-white overflow-hidden bg-white shadow-xl"
+                >
+                  <img src={activeCommunity.avatar} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                </motion.div>
+              </div>
+            </div>
+            
+            <div className="px-6 pt-12 pb-6 bg-white border-b border-black/5 shrink-0 shadow-sm">
+              <h2 className="text-2xl font-bold text-vk-text leading-tight tracking-tight">{activeCommunity.name}</h2>
+              <div className="flex items-center gap-2 mt-1.5">
+                <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-widest">{activeCommunity.members} участников</p>
+                <div className="w-1 h-1 bg-black/10 rounded-full" />
+                <p className="text-[10px] font-bold text-green-500 uppercase tracking-widest">в сети</p>
+              </div>
+            </div>
+
+            {/* Channels & Tabs Navigation */}
+            <div className="bg-white border-b border-black/5 shrink-0 z-10">
+              <div className="flex gap-3 px-6 py-3 overflow-x-auto no-scrollbar">
+                {MOCK_CHANNELS.map(ch => (
+                  <motion.button 
+                    key={ch.id}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => { setCommunityView('chat'); setActiveChannel(ch); }}
+                    className={`flex items-center gap-2.5 px-5 py-2.5 rounded-2xl text-xs font-bold uppercase tracking-wider whitespace-nowrap transition-all shadow-sm ${communityView === 'chat' && activeChannel?.id === ch.id ? 'bg-blue-600 text-white' : 'bg-black/5 text-vk-text hover:bg-black/10'}`}
+                  >
+                    <ch.icon size={18} /> {ch.name}
+                  </motion.button>
+                ))}
+                <motion.button 
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setCommunityView('members')}
+                  className={`flex items-center gap-2.5 px-5 py-2.5 rounded-2xl text-xs font-bold uppercase tracking-wider whitespace-nowrap transition-all shadow-sm ${communityView === 'members' ? 'bg-blue-600 text-white' : 'bg-black/5 text-vk-text hover:bg-black/10'}`}
+                >
+                  <UsersRound size={18} /> Участники
+                </motion.button>
+              </div>
+            </div>
+
+            {/* Content Area */}
+            <div className="flex-1 overflow-hidden relative flex flex-col bg-vk-bg">
+              {communityView === 'chat' ? (
+                <>
+                  <div className="flex-1 overflow-y-auto p-4 space-y-5">
+                    {/* Chat Messages */}
+                    {chatMessages.map(msg => {
+                      if (msg.type === 'date') {
+                        return (
+                          <div key={msg.id} className="flex justify-center my-4">
+                            <span className="bg-white/50  text-vk-text-muted text-[10px] font-bold uppercase tracking-widest px-4 py-1.5 rounded-full shadow-sm">
+                              {msg.text}
+                            </span>
+                          </div>
+                        );
+                      }
+                      const isMe = msg.sender === 'me';
+                      return (
+                        <motion.div 
+                          key={msg.id} 
+                          initial={{ opacity: 0, x: isMe ? 20 : -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          className={`flex gap-3 ${isMe ? 'justify-end' : 'justify-start'}`}
+                        >
+                          {!isMe && (
+                            <div className="w-9 h-9 rounded-2xl overflow-hidden shrink-0 mt-auto shadow-sm">
+                              <img src={MOCK_COMMUNITY_MEMBERS[1].avatar} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            </div>
+                          )}
+                          <div className={`relative group max-w-[75%] sm:max-w-[65%] p-4 shadow-sm ${isMe ? 'bg-blue-600 text-white rounded-3xl rounded-br-sm' : 'bg-white border border-black/5 text-vk-text rounded-3xl rounded-bl-sm'}`}>
+                            {!isMe && <p className="text-[10px] font-bold text-[#120a8f] uppercase tracking-wider mb-1.5">{MOCK_COMMUNITY_MEMBERS[1].name}</p>}
+                            {msg.type === 'text' && <p className="text-sm break-words whitespace-pre-wrap leading-relaxed font-medium">{msg.text}</p>}
+                            {msg.type === 'image' && (
+                              <div className="rounded-2xl overflow-hidden -mx-1 -mt-1 mb-1 shadow-sm">
+                                <img src={msg.url} alt="Attachment" className="w-full h-auto object-cover" referrerPolicy="no-referrer" />
+                              </div>
+                            )}
+                            <div className={`flex items-center justify-end gap-1 mt-2 ${isMe ? 'text-white/70' : 'text-vk-text-muted'}`}>
+                              <span className="text-[10px] font-bold uppercase tracking-wider">{msg.time}</span>
+                            </div>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                  {/* Input Area */}
+                  {activeChannel?.isReadOnly ? (
+                    <div className="p-5 bg-white/90  border-t border-black/5 text-center text-vk-text-muted text-[11px] font-bold uppercase tracking-widest shadow-lg">
+                      Только администраторы могут писать в этот канал
+                    </div>
+                  ) : (
+                    <div className="p-4 bg-white/90  border-t border-black/5 z-20 shadow-lg">
+                      <div className="flex items-end gap-3 max-w-4xl mx-auto w-full">
+                        <motion.button 
+                          whileHover={{ scale: 1.1 }}
+                          whileTap={{ scale: 0.9 }}
+                          className="p-3 text-vk-text-muted hover:text-[#120a8f] hover:bg-[#120a8f]/5 rounded-2xl transition-all shrink-0"
+                        >
+                          <Paperclip size={22} />
+                        </motion.button>
+                        <div className="flex-1 bg-black/5 border border-black/5 rounded-3xl flex items-end relative transition-all focus-within:bg-white focus-within:border-[#120a8f]/30 focus-within:shadow-md">
+                          <textarea 
+                            placeholder="Сообщение..." 
+                            className="w-full bg-transparent border-none focus:ring-0 resize-none max-h-32 min-h-[48px] py-3.5 px-5 text-sm font-medium text-vk-text placeholder-vk-text-muted"
+                            rows={1}
+                          />
+                          <motion.button 
+                            whileHover={{ scale: 1.1 }}
+                            whileTap={{ scale: 0.9 }}
+                            className="p-3 text-vk-text-muted hover:text-[#120a8f] transition-all shrink-0 mb-0.5 mr-0.5"
+                          >
+                            <Smile size={22} />
+                          </motion.button>
+                        </div>
+                        <motion.button 
+                          whileHover={{ scale: 1.1 }}
+                          whileTap={{ scale: 0.9 }}
+                          className="w-12 h-12 bg-blue-600 text-white rounded-2xl flex items-center justify-center transition-all shrink-0 shadow-md"
+                        >
+                          <Mic size={22} />
+                        </motion.button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  <div className="relative mb-4">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-vk-text-muted" size={18} />
+                    <input 
+                      type="text" 
+                      placeholder="Поиск участников" 
+                      className="w-full bg-vk-panel border border-black/10 rounded-xl py-3 pl-10 pr-4 text-vk-text placeholder-vk-text-muted focus:outline-none focus:border-vk-accent transition-colors"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    {MOCK_COMMUNITY_MEMBERS.map(member => (
+                      <div key={member.id} className="bg-vk-panel border border-black/10 rounded-2xl p-4 flex items-center gap-4 shadow-sm">
+                        <img src={member.avatar} alt={member.name} className="w-12 h-12 rounded-full object-cover" referrerPolicy="no-referrer" />
+                        <div className="flex-1">
+                          <h4 className="text-base font-bold text-vk-text">{member.name}</h4>
+                          <p className={`text-xs font-medium ${member.role === 'Админ' ? 'text-vk-accent' : 'text-vk-text-muted'}`}>{member.role}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Create Hub Profile Modal */}
+      <AnimatePresence>
+        {isCreatingHubProfile && (
+          <motion.div key="create-hub-profile" initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 50 }} className="fixed inset-0 bg-vk-bg z-50 flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 bg-vk-panel/80 sticky top-0 z-20 border-b border-black/5">
+              <div className="flex items-center gap-2">
+                <button onClick={() => setIsCreatingHubProfile(false)} className="p-2 -ml-2 text-vk-text hover:bg-black/5 rounded-full transition-colors">
+                  <X size={24} />
+                </button>
+                <h2 className="text-lg font-bold">Создать профиль хаба</h2>
+              </div>
+              <button 
+                onClick={handleCreateHubProfile} 
+                className="bg-vk-accent text-white px-4 py-1.5 rounded-full font-medium text-sm hover:opacity-90 transition-opacity"
+              >
+                Готово
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-6 max-w-2xl mx-auto w-full">
+              <div className="flex flex-col items-center gap-4">
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  className="hidden" 
+                  ref={hubPhotoInputRef}
+                  onChange={(e) => handleFileSelect(e, (base64) => {
+                    // We'll update the currentUser photoURL locally for preview if needed, 
+                    // but usually we want to store it in the hub profile
+                    setHubPhoto(base64);
+                  })}
+                />
+                <div 
+                  onClick={() => hubPhotoInputRef.current?.click()}
+                  className="w-24 h-24 rounded-3xl bg-black/5 border-2 border-dashed border-black/10 flex items-center justify-center text-vk-text-muted hover:bg-black/10 transition-colors cursor-pointer overflow-hidden"
+                >
+                  {hubPhoto || currentUser?.photoURL ? (
+                    <img src={hubPhoto || currentUser.photoURL} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (
+                    <User size={40} />
+                  )}
+                </div>
+                <span onClick={() => hubPhotoInputRef.current?.click()} className="text-sm font-medium text-vk-accent cursor-pointer">Загрузить фото профиля</span>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-vk-text-muted mb-1.5 ml-1 uppercase tracking-wider">Имя в хабе</label>
+                  <input 
+                    type="text" 
+                    placeholder="Как вас будут видеть в хабе?" 
+                    value={hubName}
+                    onChange={(e) => setHubName(e.target.value)}
+                    className="w-full bg-white border border-black/10 rounded-2xl py-3.5 px-4 text-vk-text placeholder-vk-text-muted focus:outline-none focus:ring-2 focus:ring-vk-accent/20 transition-all" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-vk-text-muted mb-1.5 ml-1 uppercase tracking-wider">Специализация / Статус</label>
+                  <input 
+                    type="text" 
+                    placeholder="Например: Дизайнер, Разработчик, Мечтатель" 
+                    value={hubSpecialization}
+                    onChange={(e) => setHubSpecialization(e.target.value)}
+                    className="w-full bg-white border border-black/10 rounded-2xl py-3.5 px-4 text-vk-text placeholder-vk-text-muted focus:outline-none focus:ring-2 focus:ring-vk-accent/20 transition-all" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-vk-text-muted mb-1.5 ml-1 uppercase tracking-wider">О себе</label>
+                  <textarea 
+                    placeholder="Расскажите сообществу о себе" 
+                    value={hubAbout}
+                    onChange={(e) => setHubAbout(e.target.value)}
+                    className="w-full bg-white border border-black/10 rounded-2xl py-3.5 px-4 text-vk-text placeholder-vk-text-muted focus:outline-none focus:ring-2 focus:ring-vk-accent/20 transition-all resize-none h-32" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-vk-text-muted mb-1.5 ml-1 uppercase tracking-wider">Интересы (через запятую)</label>
+                  <input 
+                    type="text" 
+                    placeholder="Технологии, Искусство, Спорт..." 
+                    value={hubInterests}
+                    onChange={(e) => setHubInterests(e.target.value)}
+                    className="w-full bg-white border border-black/10 rounded-2xl py-3.5 px-4 text-vk-text placeholder-vk-text-muted focus:outline-none focus:ring-2 focus:ring-vk-accent/20 transition-all" 
+                  />
+                </div>
+              </div>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
       {/* Create Community Modal */}
       <AnimatePresence>
-        {isCreateCommunityModalOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsCreateCommunityModalOpen(false)}
-              className="absolute inset-0 bg-black/60 backdrop-blur-xl"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9, y: 40 }} 
-              animate={{ opacity: 1, scale: 1, y: 0 }} 
-              exit={{ opacity: 0, scale: 0.9, y: 40 }} 
-              className="glass-panel rounded-[3rem] w-full max-w-lg overflow-hidden shadow-[0_0_100px_rgba(0,0,0,0.5)] ring-1 ring-white/10 relative z-10"
-            >
-              <div className="flex justify-between items-center p-10 pb-6">
-                <div>
-                  <h2 className="text-3xl font-black tracking-tighter text-white mb-1">Новое сообщество</h2>
-                  <p className="text-slate-500 font-bold text-[10px] uppercase tracking-widest">Создайте свое пространство</p>
-                </div>
-                <button onClick={() => setIsCreateCommunityModalOpen(false)} className="glass-icon-btn p-3 rounded-2xl text-slate-400 hover:text-white transition-all active:scale-90">
+        {isCreatingCommunity && (
+          <motion.div key="create-community" initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 50 }} className="fixed inset-0 bg-vk-bg z-50 flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 bg-vk-panel/80  sticky top-0 z-20 border-b border-black/5">
+              <div className="flex items-center gap-2">
+                <button onClick={() => setIsCreatingCommunity(false)} className="p-2 -ml-2 text-vk-text hover:bg-black/5 rounded-full transition-colors">
                   <X size={24} />
                 </button>
+                <h2 className="text-lg font-bold">Новое сообщество</h2>
               </div>
-
-              <div className="p-10 pt-0 space-y-8">
-                <div className="space-y-3">
-                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400/80 ml-1">Название</label>
+              <button 
+                onClick={handleCreateCommunity}
+                disabled={!communityName.trim()}
+                className="bg-vk-accent text-white px-4 py-1.5 rounded-full font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                Создать
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-6">
+              <div className="flex flex-col items-center gap-4">
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  className="hidden" 
+                  ref={communityAvatarInputRef}
+                  onChange={(e) => handleFileSelect(e, setCommunityAvatar)}
+                />
+                <div 
+                  onClick={() => communityAvatarInputRef.current?.click()}
+                  className="w-24 h-24 rounded-2xl bg-black/5 border-2 border-dashed border-black/10 flex items-center justify-center text-vk-text-muted hover:bg-black/10 transition-colors cursor-pointer overflow-hidden"
+                >
+                  {communityAvatar ? (
+                    <img src={communityAvatar} alt="Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                    <Camera size={32} />
+                  )}
+                </div>
+                <span onClick={() => communityAvatarInputRef.current?.click()} className="text-sm font-medium text-vk-accent cursor-pointer">Загрузить аватар</span>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-vk-text-muted mb-1.5 ml-1">Название</label>
                   <input 
                     type="text" 
-                    value={newCommunityName} 
-                    onChange={e => setNewCommunityName(e.target.value)} 
-                    className="w-full glass-input rounded-2xl px-6 py-4 text-white font-bold text-lg focus:ring-2 ring-indigo-500/50 transition-all placeholder:text-slate-700"
-                    placeholder="Название сообщества"
+                    placeholder="Введите название" 
+                    value={communityName}
+                    onChange={(e) => setCommunityName(e.target.value)}
+                    className="w-full bg-vk-panel border border-black/10 rounded-xl py-3 px-4 text-vk-text placeholder-vk-text-muted focus:outline-none focus:border-vk-accent transition-colors" 
                   />
                 </div>
-                <div className="space-y-3">
-                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400/80 ml-1">Уникальный @id</label>
-                  <div className="relative">
-                    <span className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-500 font-black text-lg">@</span>
-                    <input 
-                      type="text" 
-                      value={newCommunityUsername} 
-                      onChange={e => setNewCommunityUsername(e.target.value)} 
-                      placeholder="my_group" 
-                      className="w-full glass-input rounded-2xl pl-12 pr-6 py-4 text-white font-bold text-lg focus:ring-2 ring-indigo-500/50 transition-all placeholder:text-slate-700"
-                    />
+                <div>
+                  <label className="block text-sm font-medium text-vk-text-muted mb-1.5 ml-1">Описание</label>
+                  <textarea 
+                    placeholder="Расскажите о сообществе" 
+                    value={communityDescription}
+                    onChange={(e) => setCommunityDescription(e.target.value)}
+                    className="w-full bg-vk-panel border border-black/10 rounded-xl py-3 px-4 text-vk-text placeholder-vk-text-muted focus:outline-none focus:border-vk-accent transition-colors resize-none h-24" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-vk-text-muted mb-1.5 ml-1">Обложка</label>
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    className="hidden" 
+                    ref={communityCoverInputRef}
+                    onChange={(e) => handleFileSelect(e, setCommunityCover)}
+                  />
+                  <div 
+                    onClick={() => communityCoverInputRef.current?.click()}
+                    className="w-full h-32 rounded-xl bg-black/5 border-2 border-dashed border-black/10 flex flex-col items-center justify-center text-vk-text-muted hover:bg-black/10 transition-colors cursor-pointer overflow-hidden"
+                  >
+                    {communityCover ? (
+                      <img src={communityCover} alt="Cover" className="w-full h-full object-cover" />
+                    ) : (
+                      <>
+                        <ImagePlus size={28} className="mb-2" />
+                        <span className="text-xs font-medium">Добавить обложку</span>
+                      </>
+                    )}
                   </div>
                 </div>
-                <div className="space-y-3">
-                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400/80 ml-1">Описание</label>
-                  <textarea 
-                    value={newCommunityDesc} 
-                    onChange={e => setNewCommunityDesc(e.target.value)} 
-                    rows={4} 
-                    className="w-full glass-input rounded-3xl px-6 py-5 text-white font-medium text-lg resize-none focus:ring-2 ring-indigo-500/50 transition-all placeholder:text-slate-700 leading-relaxed"
-                    placeholder="О чем ваше сообщество?"
-                  />
-                </div>
               </div>
-
-              <div className="p-10 pt-6 flex justify-end gap-4 bg-black/20 backdrop-blur-md border-t border-white/5">
-                <button 
-                  onClick={() => setIsCreateCommunityModalOpen(false)} 
-                  className="glass-button px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all"
-                >
-                  Отмена
-                </button>
-                <button 
-                  onClick={handleCreateCommunity} 
-                  disabled={!newCommunityName.trim() || !newCommunityUsername.trim()} 
-                  className="glass-button-primary px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50 shadow-xl shadow-indigo-500/20 active:scale-95 transition-all flex items-center gap-3"
-                >
-                  <Plus size={18} />
-                  <span>Создать</span>
-                </button>
-              </div>
-            </motion.div>
-          </div>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Admin Panel Modal */}
+      {/* Community Settings Modal */}
       <AnimatePresence>
-        {isAdminPanelOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xl">
-            <motion.div initial={{ opacity: 0, scale: 0.9, y: 40 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9, y: 40 }} className="glass-panel rounded-[3rem] w-full max-w-5xl overflow-hidden max-h-[90vh] flex flex-col shadow-[0_0_100px_rgba(0,0,0,0.5)] ring-1 ring-white/10">
-              <div className="flex justify-between items-center p-10 pb-6">
-                <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 bg-indigo-500/10 text-indigo-400 rounded-2xl flex items-center justify-center shadow-inner ring-1 ring-indigo-500/20">
-                    <Shield size={32} />
+        {isCommunitySettingsOpen && (
+          <motion.div key="community-settings" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="fixed inset-0 z-[60] bg-black/40  flex items-center justify-center p-4">
+            <div className="bg-vk-panel w-full max-w-md rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-black/5">
+                <h2 className="text-lg font-bold text-vk-text">Настройки</h2>
+                <button onClick={() => setIsCommunitySettingsOpen(false)} className="p-2 -mr-2 text-vk-text-muted hover:bg-black/5 rounded-full transition-colors">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-vk-text-muted mb-1.5 ml-1">Название</label>
+                    <input type="text" defaultValue={activeCommunity?.name} className="w-full bg-black/5 border border-transparent rounded-xl py-3 px-4 text-vk-text focus:outline-none focus:border-vk-accent focus:bg-white transition-colors" />
                   </div>
                   <div>
-                    <h2 className="text-3xl font-black tracking-tighter text-white">Админ Панель</h2>
-                    <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">Управление платформой</p>
+                    <label className="block text-sm font-medium text-vk-text-muted mb-1.5 ml-1">Описание</label>
+                    <textarea defaultValue={activeCommunity?.description} className="w-full bg-black/5 border border-transparent rounded-xl py-3 px-4 text-vk-text focus:outline-none focus:border-vk-accent focus:bg-white transition-colors resize-none h-24" />
                   </div>
                 </div>
-                <button onClick={() => setIsAdminPanelOpen(false)} className="glass-icon-btn p-3 rounded-2xl text-slate-400 hover:text-white transition-all active:scale-90"><X size={24} /></button>
-              </div>
-              
-              <div className="flex px-10 border-b border-white/5 bg-black/20">
-                <button onClick={() => setAdminTab('users')} className={`px-8 py-5 font-black text-xs uppercase tracking-[0.2em] transition-all relative ${adminTab === 'users' ? 'text-indigo-400' : 'text-slate-500 hover:text-white'}`}>
-                  Пользователи
-                  {adminTab === 'users' && <motion.div layoutId="adminTab" className="absolute bottom-0 left-0 right-0 h-1 bg-indigo-500 rounded-full" />}
-                </button>
-                <button onClick={() => setAdminTab('communities')} className={`px-8 py-5 font-black text-xs uppercase tracking-[0.2em] transition-all relative ${adminTab === 'communities' ? 'text-indigo-400' : 'text-slate-500 hover:text-white'}`}>
-                  Сообщества
-                  {adminTab === 'communities' && <motion.div layoutId="adminTab" className="absolute bottom-0 left-0 right-0 h-1 bg-indigo-500 rounded-full" />}
-                </button>
-              </div>
 
-              <div className="p-10 overflow-y-auto custom-scrollbar flex-1 bg-black/10">
-                <div className="grid grid-cols-1 gap-4">
-                  {adminTab === 'users' && allUsers.map(u => (
-                    <div key={u.id} className="glass-panel p-6 rounded-3xl flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 hover:bg-white/5 transition-all ring-1 ring-white/5">
-                      <div className="flex items-center gap-5">
-                        <div className="relative">
-                          <img src={u.profileImage || `https://ui-avatars.com/api/?name=${encodeURIComponent(u.name)}&background=random`} alt={u.name} className="w-16 h-16 rounded-2xl object-cover ring-2 ring-white/10 shadow-lg" />
-                          <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-4 border-[#16161D] ${u.isOnline ? 'bg-green-500' : 'bg-slate-600'}`}></div>
-                        </div>
-                        <div>
-                          <p className="font-black text-white text-lg flex items-center gap-2 tracking-tight">
-                            {u.name}
-                            {u.isVerified && <BadgeCheck size={18} className="text-indigo-400" />}
-                            {u.isAdmin && <Shield size={18} className="text-purple-500" />}
-                            {renderVipBadge(u.vipStatus)}
-                          </p>
-                          <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">@{u.username}</p>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <button onClick={() => handleToggleUserStatus(u.id, 'isAdmin', u.isAdmin)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${u.isAdmin ? 'bg-purple-500 text-white shadow-lg shadow-purple-500/20' : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}>Admin</button>
-                        <button onClick={() => handleToggleUserStatus(u.id, 'isVerified', u.isVerified)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${u.isVerified ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}>Verified</button>
-                        <button onClick={() => handleToggleUserStatus(u.id, 'isMuted', u.isMuted)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${u.isMuted ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}>Muted</button>
-                        <button onClick={() => handleToggleUserStatus(u.id, 'isFrozen', u.isFrozen)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${u.isFrozen ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/20' : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}>Frozen</button>
-                        <button onClick={() => handleToggleUserStatus(u.id, 'isBanned', u.isBanned)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${u.isBanned ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}>Banned</button>
-                        <div className="h-8 w-px bg-white/5 mx-2 self-center hidden lg:block"></div>
-                        <div className="flex gap-1">
-                          <button onClick={() => handleSetUserVip(u.id, u.vipStatus === 'bronze' ? 'none' : 'bronze')} className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${u.vipStatus === 'bronze' ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/20' : 'bg-white/5 text-slate-500 hover:bg-white/10 hover:text-white'}`} title="VIP Bronze"><Award size={18} /></button>
-                          <button onClick={() => handleSetUserVip(u.id, u.vipStatus === 'silver' ? 'none' : 'silver')} className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${u.vipStatus === 'silver' ? 'bg-slate-400 text-white shadow-lg shadow-slate-400/20' : 'bg-white/5 text-slate-500 hover:bg-white/10 hover:text-white'}`} title="VIP Silver"><Award size={18} /></button>
-                          <button onClick={() => handleSetUserVip(u.id, u.vipStatus === 'gold' ? 'none' : 'gold')} className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${u.vipStatus === 'gold' ? 'bg-yellow-500 text-white shadow-lg shadow-yellow-500/20' : 'bg-white/5 text-slate-500 hover:bg-white/10 hover:text-white'}`} title="VIP Gold"><Award size={18} /></button>
-                        </div>
+                <div className="space-y-4 pt-4 border-t border-black/5">
+                  <h3 className="text-sm font-bold text-vk-text-muted uppercase tracking-wider">Приватность</h3>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-vk-accent/10 text-vk-accent flex items-center justify-center"><Lock size={20} /></div>
+                      <div>
+                        <p className="font-medium text-vk-text text-sm">Закрытое сообщество</p>
+                        <p className="text-xs text-vk-text-muted">Вступление по заявкам</p>
                       </div>
                     </div>
-                  ))}
-
-                  {adminTab === 'communities' && communities.map(c => (
-                    <div key={c.id} className="glass-panel p-6 rounded-3xl flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 hover:bg-white/5 transition-all ring-1 ring-white/5">
-                      <div className="flex items-center gap-5">
-                        <div className="w-16 h-16 bg-indigo-500/10 rounded-2xl flex items-center justify-center text-indigo-400 font-black text-2xl shadow-inner ring-1 ring-indigo-500/20">
-                          {c.name.charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="font-black text-white text-lg tracking-tight">
-                            {c.name}
-                            {c.isVerified && <BadgeCheck size={18} className="text-indigo-400" />}
-                            {c.isAdmin && <Shield size={18} className="text-purple-500" />}
-                          </p>
-                          <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">@{c.username}</p>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <button onClick={() => handleToggleCommunityStatus(c.id, 'isAdmin', c.isAdmin)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${c.isAdmin ? 'bg-purple-500 text-white shadow-lg shadow-purple-500/20' : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}>Admin</button>
-                        <button onClick={() => handleToggleCommunityStatus(c.id, 'isVerified', c.isVerified)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${c.isVerified ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}>Verified</button>
-                        <button onClick={() => handleToggleCommunityStatus(c.id, 'isMuted', c.isMuted)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${c.isMuted ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}>Muted</button>
-                        <button onClick={() => handleToggleCommunityStatus(c.id, 'isFrozen', c.isFrozen)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${c.isFrozen ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/20' : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}>Frozen</button>
-                        <button onClick={() => handleToggleCommunityStatus(c.id, 'isBanned', c.isBanned)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${c.isBanned ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}>Banned</button>
-                        <div className="h-8 w-px bg-white/5 mx-2 self-center hidden lg:block"></div>
-                        <button onClick={() => {
-                          if (confirm(`Вы уверены, что хотите удалить сообщество "${c.name}"?`)) {
-                            deleteDoc(doc(db, 'communities', c.id));
-                          }
-                        }} className="glass-button px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest text-red-400 hover:bg-red-400/10 hover:text-red-300 transition-all active:scale-95">
-                          Удалить
-                        </button>
+                    <div className="w-12 h-6 bg-black/10 rounded-full relative cursor-pointer">
+                      <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full shadow-sm" />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-vk-accent/10 text-vk-accent flex items-center justify-center"><MessageCircle size={20} /></div>
+                      <div>
+                        <p className="font-medium text-vk-text text-sm">Сообщения сообщества</p>
+                        <p className="text-xs text-vk-text-muted">Разрешить писать в ЛС</p>
                       </div>
                     </div>
-                  ))}
+                    <div className="w-12 h-6 bg-vk-accent rounded-full relative cursor-pointer">
+                      <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full shadow-sm" />
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div className="p-10 pt-6 flex justify-end bg-black/20 backdrop-blur-md border-t border-white/5">
-                <button onClick={() => setIsAdminPanelOpen(false)} className="glass-button-primary px-12 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-indigo-500/20 active:scale-95 transition-all">Закрыть</button>
+              <div className="p-4 border-t border-black/5 bg-black/[0.02]">
+                <button onClick={() => setIsCommunitySettingsOpen(false)} className="w-full bg-vk-accent text-white py-3 rounded-xl font-medium hover:opacity-90 transition-opacity">
+                  Сохранить изменения
+                </button>
               </div>
-            </motion.div>
-          </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Admin Panel Overlay */}
+      <AnimatePresence>
+        {isAdminPanelOpen && (
+          <motion.div
+            key="admin-panel"
+            initial={{ opacity: 0, y: '100%' }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: '100%' }}
+            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            className="fixed inset-0 z-[70] bg-vk-bg flex flex-col"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-4 bg-white border-b border-black/5 shrink-0 shadow-sm z-10">
+              <div className="flex items-center gap-3">
+                <motion.button 
+                  whileHover={{ scale: 1.1, x: -2 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => setIsAdminPanelOpen(false)} 
+                  className="p-2 -ml-2 text-vk-text hover:bg-black/5 rounded-full transition-colors"
+                >
+                  <ChevronLeft size={24} />
+                </motion.button>
+                <h2 className="text-xl font-bold text-[#120a8f] flex items-center gap-2">
+                  <ShieldAlert size={22} />
+                  Админ-панель
+                </h2>
+              </div>
+            </div>
+
+            {/* Tabs */}
+            <div className="bg-white border-b border-black/5 shrink-0 overflow-x-auto no-scrollbar">
+              <div className="flex px-4 py-3 gap-2 min-w-max">
+                {ADMIN_TABS.map(tab => {
+                  const isActive = adminTab === tab.id;
+                  return (
+                    <motion.button
+                      key={tab.id}
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => setAdminTab(tab.id)}
+                      className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-bold transition-all ${
+                        isActive 
+                          ? 'bg-blue-600 text-white shadow-lg shadow-[#120a8f]/20' 
+                          : 'bg-black/5 text-vk-text-muted hover:bg-black/10 hover:text-vk-text'
+                      }`}
+                    >
+                      <tab.icon size={18} />
+                      {tab.label}
+                    </motion.button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-4 bg-vk-bg">
+              <div className="max-w-4xl mx-auto w-full">
+                
+                {/* Dashboard */}
+                {adminTab === 'dashboard' && (
+                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm hover:shadow-md transition-shadow">
+                      <Users className="text-[#120a8f] mb-3" size={32} />
+                      <p className="text-3xl font-black text-vk-text mb-1">15,234</p>
+                      <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-wider">Всего пользователей</p>
+                    </div>
+                    <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm hover:shadow-md transition-shadow">
+                      <UsersRound className="text-purple-500 mb-3" size={32} />
+                      <p className="text-3xl font-black text-vk-text mb-1">1,042</p>
+                      <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-wider">Всего сообществ</p>
+                    </div>
+                    <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm hover:shadow-md transition-shadow">
+                      <MessageSquare className="text-blue-500 mb-3" size={32} />
+                      <p className="text-3xl font-black text-vk-text mb-1">842K</p>
+                      <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-wider">Всего сообщений</p>
+                    </div>
+                    <div className="bg-white p-6 rounded-3xl border border-black/5 shadow-sm hover:shadow-md transition-shadow">
+                      <Activity className="text-green-500 mb-3" size={32} />
+                      <p className="text-3xl font-black text-vk-text mb-1">3,421</p>
+                      <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-wider">Активные сегодня</p>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Users */}
+                {adminTab === 'users' && (
+                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
+                    {[1, 2, 3].map(i => (
+                      <motion.div 
+                        key={i} 
+                        whileHover={{ scale: 1.01 }}
+                        className="bg-white p-4 rounded-3xl border border-black/5 shadow-sm space-y-4"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="w-14 h-14 rounded-2xl overflow-hidden shadow-sm">
+                            <img src={`https://picsum.photos/seed/user${i}/100/100`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="font-bold text-vk-text text-base flex items-center gap-1">
+                              Пользователь {i}
+                              {i === 1 && <Badge type="verified" size={14} />}
+                            </h4>
+                            <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-wider">@user_{i} • {i === 1 ? 'Админ' : 'Пользователь'}</p>
+                          </div>
+                          <div className="w-3 h-3 rounded-full bg-green-500 shadow-lg shadow-green-500/20" />
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-2 border-t border-black/5">
+                          <button onClick={() => toast.success(`Пользователь ${i} верифицирован`)} className="px-3 py-2 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors"><CheckCircle size={14}/> Вериф</button>
+                          <button onClick={() => toast.success(`Пользователь ${i} назначен админом`)} className="px-3 py-2 bg-purple-50 text-purple-600 hover:bg-purple-100 rounded-xl text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors"><Shield size={14}/> Админ</button>
+                          <button onClick={() => toast.success(`Пользователь ${i} получил статус Бронза`)} className="px-3 py-2 bg-amber-50 text-amber-700 hover:bg-amber-100 rounded-xl text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors"><Gem size={14}/> Бронза</button>
+                          <button onClick={() => toast.success(`Пользователь ${i} получил статус Диамант`)} className="px-3 py-2 bg-blue-50 text-blue-400 hover:bg-blue-100 rounded-xl text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors"><Gem size={14}/> Диамант</button>
+                          <button onClick={() => toast.error(`Пользователь ${i} заблокирован`)} className="px-3 py-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors ml-auto"><Ban size={14}/> Блок</button>
+                          <button onClick={() => toast.error(`Пользователь ${i} удален`)} className="px-3 py-2 bg-red-100 text-red-700 hover:bg-red-200 rounded-xl text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors"><Trash2 size={14}/> Удал</button>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </motion.div>
+                )}
+
+                {/* Communities */}
+                {adminTab === 'communities' && (
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+                    {[1, 2].map(i => (
+                      <div key={i} className="bg-vk-panel p-4 rounded-3xl border border-black/5 shadow-sm space-y-4">
+                        <div className="flex items-center gap-3">
+                          <img src={`https://picsum.photos/seed/community${i}/100/100`} className="w-12 h-12 rounded-xl object-cover" referrerPolicy="no-referrer" />
+                          <div className="flex-1">
+                            <h4 className="font-bold text-vk-text text-sm sm:text-base">Сообщество {i}</h4>
+                            <p className="text-xs text-vk-text-muted">1.2M участников • Публичное</p>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button onClick={() => toast.success(`Редактирование сообщества ${i}`)} className="px-3 py-1.5 bg-black/5 text-vk-text hover:bg-black/10 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"><Edit size={14}/> Ред.</button>
+                          <button onClick={() => toast.success(`Сообщество ${i} верифицировано`)} className="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"><CheckCircle size={14}/> Вериф</button>
+                          <button onClick={() => toast.success(`Сообщество ${i} получило верификацию`)} className="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"><CheckCircle size={14}/> Верификация</button>
+                          <button onClick={() => toast.error(`Сообщество ${i} закрыто`)} className="px-3 py-1.5 bg-orange-50 text-orange-600 hover:bg-orange-100 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors ml-auto"><Lock size={14}/> Закрыть</button>
+                          <button onClick={() => toast.error(`Сообщество ${i} удалено`)} className="px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"><Trash2 size={14}/> Удал</button>
+                        </div>
+                      </div>
+                    ))}
+                  </motion.div>
+                )}
+
+                {/* Chats */}
+                {adminTab === 'chats' && (
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+                    {[1, 2, 3].map(i => (
+                      <div key={i} className="bg-vk-panel p-4 rounded-3xl border border-black/5 shadow-sm space-y-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-full bg-black/5 flex items-center justify-center"><MessageSquare size={24} className="text-vk-text-muted"/></div>
+                          <div className="flex-1">
+                            <h4 className="font-bold text-vk-text text-sm sm:text-base">Чат {i}</h4>
+                            <p className="text-xs text-vk-text-muted">Участников: {i * 12} • Активен</p>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button onClick={() => toast.success(`Чат ${i} очищен`)} className="px-3 py-1.5 bg-black/5 text-vk-text hover:bg-black/10 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"><Eraser size={14}/> Очистить</button>
+                          <button onClick={() => toast.success(`Чат ${i} закреплен`)} className="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"><Pin size={14}/> Закрепить</button>
+                          <button onClick={() => toast.error(`Чат ${i} удален`)} className="px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors ml-auto"><Trash2 size={14}/> Удалить</button>
+                        </div>
+                      </div>
+                    ))}
+                  </motion.div>
+                )}
+
+                {/* Posts */}
+                {adminTab === 'posts' && (
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+                    {[1, 2].map(i => (
+                      <div key={i} className="bg-vk-panel p-4 rounded-3xl border border-black/5 shadow-sm space-y-4">
+                        <div className="flex items-center gap-3">
+                          <img src={`https://picsum.photos/seed/user${i}/100/100`} className="w-10 h-10 rounded-full object-cover" referrerPolicy="no-referrer" />
+                          <div className="flex-1">
+                            <h4 className="font-bold text-vk-text text-sm">Пользователь {i}</h4>
+                            <p className="text-xs text-vk-text-muted">Сегодня в 12:00</p>
+                          </div>
+                        </div>
+                        <p className="text-sm text-vk-text bg-black/5 p-3 rounded-xl">Пример текста поста для модерации. Здесь может быть любой контент пользователя...</p>
+                        <div className="flex flex-wrap gap-2">
+                          <button onClick={() => toast.success(`Пост ${i} закреплен`)} className="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"><Pin size={14}/> Закрепить</button>
+                          <button onClick={() => toast.error(`Пост ${i} удален`)} className="px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors ml-auto"><Trash2 size={14}/> Удалить</button>
+                        </div>
+                      </div>
+                    ))}
+                  </motion.div>
+                )}
+
+                {/* Settings */}
+                {adminTab === 'settings' && (
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+                    <div className="bg-vk-panel p-5 rounded-3xl border border-black/5 shadow-sm space-y-5">
+                      <h3 className="font-bold text-vk-text text-base">Настройки интерфейса</h3>
+                      
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-vk-text">Управление вкладками</p>
+                          <p className="text-xs text-vk-text-muted">Скрывать неиспользуемые</p>
+                        </div>
+                        <div onClick={() => toast.info('Настройка "Управление вкладками" изменена')} className="w-12 h-6 bg-vk-accent rounded-full relative cursor-pointer"><div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full shadow-sm" /></div>
+                      </div>
+                      
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-vk-text">Push-уведомления</p>
+                          <p className="text-xs text-vk-text-muted">Включить системные алерты</p>
+                        </div>
+                        <div onClick={() => toast.info('Настройка "Push-уведомления" изменена')} className="w-12 h-6 bg-vk-accent rounded-full relative cursor-pointer"><div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full shadow-sm" /></div>
+                      </div>
+                      
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-vk-text">Режим отладки</p>
+                          <p className="text-xs text-vk-text-muted">Для разработчиков</p>
+                        </div>
+                        <div className="w-12 h-6 bg-black/10 rounded-full relative cursor-pointer"><div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full shadow-sm" /></div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Нижняя панель навигации */}
+      <AnimatePresence>
+        {!activeChat && !activeCommunity && !selectedPost && !isCreatingCommunity && !isAdminPanelOpen && (
+          <motion.div 
+            initial={{ y: 100 }}
+            animate={{ y: 0 }}
+            exit={{ y: 100 }}
+            className="fixed bottom-0 left-0 right-0 z-[100] bg-white/70 backdrop-blur-lg border-t border-black/5 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] pb-safe"
+          >
+            <div className="flex justify-between items-center h-14 px-6 max-w-2xl mx-auto w-full">
+              {NAV_ITEMS.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setActiveTab(item.id);
+                      setViewingProfile(null);
+                    }}
+                    className="relative flex flex-col items-center justify-center w-12 h-12 rounded-2xl transition-all"
+                  >
+                    <motion.div
+                      animate={{ 
+                        scale: isActive ? 1.1 : 1,
+                        color: isActive ? '#3b82f6' : '#64748b'
+                      }}
+                      transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                    >
+                      <Icon size={22} strokeWidth={isActive ? 2.5 : 2} />
+                    </motion.div>
+                    {isActive && (
+                      <motion.div 
+                        layoutId="nav-indicator"
+                        className="absolute -bottom-1 w-1 h-1 bg-blue-500 rounded-full"
+                        transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
   );
 }
+

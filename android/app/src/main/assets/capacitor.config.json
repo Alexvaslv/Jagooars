@@ -1,0 +1,8 @@
+{
+	"appId": "com.communityhub.app",
+	"appName": "Community Hub",
+	"webDir": "dist",
+	"server": {
+		"androidScheme": "https"
+	}
+}
