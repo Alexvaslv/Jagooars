@@ -1,10 +1,12 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore, enableIndexedDbPersistence, doc, getDocFromServer, initializeFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+export const storage = getStorage(app);
 
 // Initialize Firestore with long polling as a fallback for restrictive networks
 export const db = initializeFirestore(app, {

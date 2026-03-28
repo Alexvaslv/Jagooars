@@ -7,11 +7,14 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Home, Users, MessageCircle, LayoutGrid, User, Aperture, Settings, LogOut, Image as ImageIcon, Music, ChevronLeft, Camera, Plus, Heart, Share2, MoreHorizontal, Send, Pin, Search, Bell, X, Eye, EyeOff, UserPlus, UserMinus, Check, CheckCheck, Paperclip, Smile, Mic, MoreVertical, Copy, Reply, Trash2, Play, Newspaper, Coffee, Shield, Lock, Globe, Hash, UsersRound, ImagePlus, ShieldAlert, Activity, FileText, Award, CheckCircle, Ban, Eraser, Crown, Gem, Medal, MessageSquare, Edit } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
-import { auth, db, googleProvider } from './firebase';
+import { auth, db, googleProvider, storage } from './firebase';
 import { signInWithPopup, onAuthStateChanged, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, signInAnonymously } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp, collection, addDoc, onSnapshot, query, orderBy, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp, collection, addDoc, onSnapshot, query, orderBy, updateDoc, deleteDoc, where } from 'firebase/firestore';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { handleFirestoreError, OperationType } from './lib/firebase-utils';
 import { Logo } from './components/Logo';
+
+import { seedTestData } from './mockDataGenerator';
 
 const Badge = ({ type, size = 16 }: { type: 'verified' | 'admin' | 'creator', size?: number }) => {
   const badges = {
@@ -64,10 +67,19 @@ const FriendItem = React.memo(({ friend, onClick }: { friend: any, onClick: () =
     </div>
     <div className="flex-1">
       <h4 className="text-base font-bold text-vk-text flex items-center gap-1">
-        {friend.name}
+        <motion.span
+          whileHover={{ x: 2, color: '#120a8f' }}
+          className="transition-colors cursor-default"
+        >
+          {friend.name}
+        </motion.span>
         {friend.isVerified && <Badge type="verified" size={14} />}
       </h4>
-      <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-wider">{friend.isOnline ? 'Online' : friend.lastSeen}</p>
+      <div className="flex items-center gap-1.5">
+        <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-wider">{friend.isOnline ? 'Online' : friend.lastSeen}</p>
+        <span className="text-[10px] text-vk-text-muted">•</span>
+        <p className="text-[10px] font-medium text-vk-text-muted">{friend.username || `@id${friend.uid?.substring(0, 8)}`}</p>
+      </div>
     </div>
     <button 
       className="w-10 h-10 rounded-full bg-[#120a8f]/5 text-[#120a8f] flex items-center justify-center hover:bg-[#120a8f]/10 transition-colors" 
@@ -82,7 +94,7 @@ const FriendItem = React.memo(({ friend, onClick }: { friend: any, onClick: () =
 ));
 
 // Оптимизированный компонент сообщества
-const CommunityItem = React.memo(({ community, onClick }: { community: any, onClick: () => void }) => (
+const CommunityItem = React.memo(({ community, isMember, onJoin, onLeave, onClick }: { community: any, isMember: boolean, onJoin: (e: React.MouseEvent) => void, onLeave: (e: React.MouseEvent) => void, onClick: () => void }) => (
   <motion.div
     initial={{ opacity: 0, scale: 0.95 }}
     animate={{ opacity: 1, scale: 1 }}
@@ -94,12 +106,38 @@ const CommunityItem = React.memo(({ community, onClick }: { community: any, onCl
       <img src={community.avatar} alt={community.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
     </div>
     <div className="flex-1 min-w-0">
-      <h4 className="text-base font-bold text-vk-text truncate">{community.name}</h4>
-      <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-wider">{community.members} • {community.category}</p>
+      <motion.h4 
+        whileHover={{ x: 2, color: '#120a8f' }}
+        className="text-base font-bold text-vk-text truncate transition-colors cursor-default"
+      >
+        {community.name}
+      </motion.h4>
+      <div className="flex items-center gap-1.5">
+        <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-wider">{community.membersCount || 0} участников</p>
+        <span className="text-[10px] text-vk-text-muted">•</span>
+        <p className="text-[10px] font-medium text-vk-text-muted">{community.username || `@id${community.id?.substring(0, 8)}`}</p>
+      </div>
     </div>
-    <button className="px-4 py-1.5 bg-[#120a8f]/5 text-[#120a8f] hover:bg-[#120a8f]/10 rounded-xl text-xs font-bold transition-colors">
-      Зайти
-    </button>
+    <div className="flex gap-2">
+      {isMember ? (
+        <button 
+          onClick={onLeave}
+          className="px-4 py-1.5 bg-red-50 text-red-500 hover:bg-red-100 rounded-xl text-xs font-bold transition-colors"
+        >
+          Выйти
+        </button>
+      ) : (
+        <button 
+          onClick={onJoin}
+          className="px-4 py-1.5 bg-[#120a8f]/5 text-[#120a8f] hover:bg-[#120a8f]/10 rounded-xl text-xs font-bold transition-colors"
+        >
+          Вступить
+        </button>
+      )}
+      <button className="px-4 py-1.5 bg-[#120a8f] text-white hover:opacity-90 rounded-xl text-xs font-bold transition-colors">
+        Зайти
+      </button>
+    </div>
   </motion.div>
 ));
 
@@ -118,10 +156,13 @@ const ChatItem = React.memo(({ chat, onClick }: { chat: any, onClick: () => void
     </div>
     <div className="flex-1 overflow-hidden">
       <div className="flex justify-between items-center mb-1">
-        <h4 className="text-base font-bold text-vk-text truncate flex items-center gap-1">
+        <motion.h4 
+          whileHover={{ x: 3, color: '#120a8f' }}
+          className="text-base font-bold text-vk-text truncate flex items-center gap-1 transition-colors"
+        >
           {chat.name}
           {chat.isVerified && <Badge type="verified" size={14} />}
-        </h4>
+        </motion.h4>
         <span className="text-[10px] font-bold text-vk-text-muted uppercase tracking-wider shrink-0">{chat.time}</span>
       </div>
       <div className="flex items-center justify-between">
@@ -137,69 +178,79 @@ const ChatItem = React.memo(({ chat, onClick }: { chat: any, onClick: () => void
 ));
 
 // Оптимизированный компонент поста
-const PostItem = React.memo(({ post, onClick }: { post: any, onClick: () => void }) => (
-  <motion.div 
-    initial={{ opacity: 0, y: 20 }} 
-    animate={{ opacity: 1, y: 0 }} 
-    className="bg-white border-y border-black/5 sm:border sm:rounded-3xl shadow-sm cursor-pointer hover:shadow-md transition-all mb-3 overflow-hidden" 
-    onClick={onClick}
-  >
-    <div className="p-4">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl overflow-hidden shadow-sm">
-            <img src={post.author.avatar} alt="Avatar" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+const PostItem = React.memo(({ post, onClick }: { post: any, onClick?: () => void }) => {
+  const authorName = post.author?.name || post.authorName;
+  const authorAvatar = post.author?.avatar || post.authorPhoto;
+  const authorIsVerified = post.author?.isVerified || post.authorIsVerified;
+  const time = post.time || (post.createdAt ? new Date(post.createdAt).toLocaleString() : '');
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }} 
+      animate={{ opacity: 1, y: 0 }} 
+      className="bg-white border-y border-black/5 sm:border sm:rounded-3xl shadow-sm cursor-pointer hover:shadow-md transition-all mb-3 overflow-hidden" 
+      onClick={onClick}
+    >
+      <div className="p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl overflow-hidden shadow-sm">
+              <img src={authorAvatar} alt="Avatar" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+            </div>
+            <div>
+              <motion.h4 
+                whileHover={{ x: 3, color: '#120a8f' }}
+                className="text-sm font-bold text-vk-text flex items-center gap-1 transition-colors"
+              >
+                {authorName}
+                {authorIsVerified && <Badge type="verified" size={14} />}
+              </motion.h4>
+              <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-wider">{time}</p>
+            </div>
           </div>
-          <div>
-            <h4 className="text-sm font-bold text-vk-text flex items-center gap-1">
-              {post.author.name}
-              {post.author.isVerified && <Badge type="verified" size={14} />}
-            </h4>
-            <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-wider">{post.time}</p>
+          <button className="text-vk-text-muted hover:text-vk-text p-1" onClick={(e) => e.stopPropagation()}>
+            <MoreHorizontal size={20} />
+          </button>
+        </div>
+        
+        <p className="text-vk-text text-sm leading-relaxed mb-3 whitespace-pre-wrap">{post.text}</p>
+        
+        {post.image && (
+          <div className="rounded-2xl overflow-hidden mb-3 border border-black/5">
+            <img src={post.image} alt="Post" className="w-full h-auto object-cover max-h-[400px]" referrerPolicy="no-referrer" />
+          </div>
+        )}
+        
+        <div className="flex items-center justify-between pt-3 border-t border-black/5">
+          <div className="flex items-center gap-4">
+            <button className="flex items-center gap-1.5 text-vk-text-muted hover:text-red-500 transition-colors group">
+              <div className="p-1.5 rounded-full group-hover:bg-red-50 transition-colors">
+                <Heart size={20} />
+              </div>
+              <span className="text-xs font-bold">{post.likes}</span>
+            </button>
+            <button className="flex items-center gap-1.5 text-vk-text-muted hover:text-vk-accent transition-colors group">
+              <div className="p-1.5 rounded-full group-hover:bg-vk-accent/5 transition-colors">
+                <MessageCircle size={20} />
+              </div>
+              <span className="text-xs font-bold">{post.comments}</span>
+            </button>
+            <button className="flex items-center gap-1.5 text-vk-text-muted hover:text-blue-500 transition-colors group">
+              <div className="p-1.5 rounded-full group-hover:bg-blue-50 transition-colors">
+                <Share2 size={20} />
+              </div>
+              <span className="text-xs font-bold">{post.shares}</span>
+            </button>
+          </div>
+          <div className="flex items-center gap-1 text-vk-text-muted">
+            <Eye size={14} />
+            <span className="text-[10px] font-bold">{(post.views || (post.likes * 12)).toLocaleString()}</span>
           </div>
         </div>
-        <button className="text-vk-text-muted hover:text-vk-text p-1" onClick={(e) => e.stopPropagation()}>
-          <MoreHorizontal size={20} />
-        </button>
       </div>
-      
-      <p className="text-vk-text text-sm leading-relaxed mb-3">{post.text}</p>
-      
-      {post.image && (
-        <div className="rounded-2xl overflow-hidden mb-3 border border-black/5">
-          <img src={post.image} alt="Post" className="w-full h-auto object-cover max-h-[400px]" referrerPolicy="no-referrer" />
-        </div>
-      )}
-      
-      <div className="flex items-center justify-between pt-3 border-t border-black/5">
-        <div className="flex items-center gap-4">
-          <button className="flex items-center gap-1.5 text-vk-text-muted hover:text-red-500 transition-colors group">
-            <div className="p-1.5 rounded-full group-hover:bg-red-50 transition-colors">
-              <Heart size={20} />
-            </div>
-            <span className="text-xs font-bold">{post.likes}</span>
-          </button>
-          <button className="flex items-center gap-1.5 text-vk-text-muted hover:text-vk-accent transition-colors group">
-            <div className="p-1.5 rounded-full group-hover:bg-vk-accent/5 transition-colors">
-              <MessageCircle size={20} />
-            </div>
-            <span className="text-xs font-bold">{post.comments}</span>
-          </button>
-          <button className="flex items-center gap-1.5 text-vk-text-muted hover:text-blue-500 transition-colors group">
-            <div className="p-1.5 rounded-full group-hover:bg-blue-50 transition-colors">
-              <Share2 size={20} />
-            </div>
-            <span className="text-xs font-bold">{post.shares}</span>
-          </button>
-        </div>
-        <div className="flex items-center gap-1 text-vk-text-muted">
-          <Eye size={14} />
-          <span className="text-[10px] font-bold">{(post.likes * 12).toLocaleString()}</span>
-        </div>
-      </div>
-    </div>
-  </motion.div>
-));
+    </motion.div>
+  );
+});
 
 const MOCK_STORIES = [
   { id: 1, name: 'Ваш', avatar: DEFAULT_AVATAR, isAdd: true, hasUnseen: false },
@@ -299,6 +350,24 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [isIntroPlaying, setIsIntroPlaying] = useState(true);
 
+  // Состояния для сообществ
+  const [communities, setCommunities] = useState<any[]>([]);
+  const [userMemberships, setUserMemberships] = useState<any[]>([]);
+  const [communityPosts, setCommunityPosts] = useState<any[]>([]);
+  const [newCommunityPostText, setNewCommunityPostText] = useState('');
+  const [isPostingToCommunity, setIsPostingToCommunity] = useState(false);
+  const [communitiesSearch, setCommunitiesSearch] = useState('');
+  const [activeCommunity, setActiveCommunity] = useState<any>(null);
+  const [activeChannel, setActiveChannel] = useState<any>(MOCK_CHANNELS[0]);
+  const [communityView, setCommunityView] = useState<'chat' | 'members' | 'feed'>('chat');
+  const [isSeeding, setIsSeeding] = useState(false);
+  const [isCreatingCommunity, setIsCreatingCommunity] = useState(false);
+  const [communityName, setCommunityName] = useState('');
+  const [communityDescription, setCommunityDescription] = useState('');
+  const [communityAvatar, setCommunityAvatar] = useState<string | null>(null);
+  const [communityCover, setCommunityCover] = useState<string | null>(null);
+  const [isCommunitySettingsOpen, setIsCommunitySettingsOpen] = useState(false);
+
   useEffect(() => {
     console.log("App state:", { isAuthReady, currentUser: !!currentUser, isIntroPlaying });
   }, [isAuthReady, currentUser, isIntroPlaying]);
@@ -366,7 +435,7 @@ export default function App() {
             const isGlobalAdmin = user.email === 'alexeivasilev270819942@gmail.com';
             const newUserData = {
               uid: user.uid,
-              username: user.email?.split('@')[0] || `user_${user.uid.substring(0, 5)}`,
+              username: `@id${user.uid.substring(0, 8)}`,
               displayName: user.displayName || 'Пользователь',
               email: user.email,
               photoURL: user.photoURL || DEFAULT_AVATAR,
@@ -461,10 +530,64 @@ export default function App() {
     return () => unsubscribe();
   }, [isAuthReady, currentUser]);
 
+  useEffect(() => {
+    if (!isAuthReady || !currentUser) return;
+
+    const q = query(collection(db, 'communities'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedCommunities = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setCommunities(fetchedCommunities);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'communities');
+    });
+
+    return () => unsubscribe();
+  }, [isAuthReady, currentUser]);
+
+  useEffect(() => {
+    if (!isAuthReady || !currentUser) return;
+
+    const q = query(collection(db, 'memberships'), where('userId', '==', currentUser.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedMemberships = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setUserMemberships(fetchedMemberships);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'memberships');
+    });
+
+    return () => unsubscribe();
+  }, [isAuthReady, currentUser]);
+
+  useEffect(() => {
+    if (!isAuthReady || !currentUser || !activeCommunity) {
+      setCommunityPosts([]);
+      return;
+    }
+
+    const q = query(collection(db, 'communities', activeCommunity.id, 'posts'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedPosts = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setCommunityPosts(fetchedPosts);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, `communities/${activeCommunity.id}/posts`);
+    });
+
+    return () => unsubscribe();
+  }, [isAuthReady, currentUser, activeCommunity]);
+
   // Состояния для профиля
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [viewingProfile, setViewingProfile] = useState<{ id: string, name: string, avatar: string, isFriend?: boolean, isOnline?: boolean, lastSeen?: string, about?: string, isAI?: boolean, isVerified?: boolean, isAdmin?: boolean, isCreator?: boolean, specialization?: string, interests?: string[] } | null>(null);
+  const [viewingProfile, setViewingProfile] = useState<{ id: string, name: string, username?: string, avatar: string, isFriend?: boolean, isOnline?: boolean, lastSeen?: string, about?: string, isAI?: boolean, isVerified?: boolean, isAdmin?: boolean, isCreator?: boolean, specialization?: string, interests?: string[] } | null>(null);
   const [selectedPost, setSelectedPost] = useState<any>(null);
   const [newPostText, setNewPostText] = useState('');
   const [newPostImage, setNewPostImage] = useState<string | null>(null);
@@ -472,19 +595,95 @@ export default function App() {
   const hubPhotoInputRef = useRef<HTMLInputElement>(null);
   const communityAvatarInputRef = useRef<HTMLInputElement>(null);
   const communityCoverInputRef = useRef<HTMLInputElement>(null);
+  const userAvatarInputRef = useRef<HTMLInputElement>(null);
+  const userCoverInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>, callback: (base64: string) => void) => {
+  const [editProfileName, setEditProfileName] = useState('');
+  const [editProfileAbout, setEditProfileAbout] = useState('');
+  const [editProfileSpec, setEditProfileSpec] = useState('');
+  const [editProfileInterests, setEditProfileInterests] = useState('');
+  const [editProfileAvatar, setEditProfileAvatar] = useState<string | null>(null);
+  const [editProfileCover, setEditProfileCover] = useState<string | null>(null);
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>, callback: (url: string) => void) => {
     const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 1024 * 1024) { // 1MB limit for base64 in Firestore
-        toast.error('Файл слишком большой (макс. 1МБ)');
-        return;
-      }
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast.error('Пожалуйста, выберите изображение');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Размер файла не должен превышать 5 МБ');
+      return;
+    }
+
+    const toastId = toast.loading('Загрузка изображения...');
+
+    try {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        callback(reader.result as string);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = async () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          
+          const MAX_DIM = 1200;
+          if (width > MAX_DIM || height > MAX_DIM) {
+            if (width > height) {
+              height *= MAX_DIM / width;
+              width = MAX_DIM;
+            } else {
+              width *= MAX_DIM / height;
+              height = MAX_DIM;
+            }
+          }
+          
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          
+          canvas.toBlob(async (blob) => {
+            if (!blob) {
+              toast.error('Ошибка при обработке изображения', { id: toastId });
+              return;
+            }
+            
+            try {
+              const fileName = `uploads/${auth.currentUser?.uid || 'guest'}_${Date.now()}.webp`;
+              const storageRef = ref(storage, fileName);
+              
+              const uploadTask = uploadBytesResumable(storageRef, blob);
+              
+              uploadTask.on('state_changed', 
+                (snapshot) => {
+                  // Optional: handle progress
+                },
+                (error) => {
+                  console.error('Upload error:', error);
+                  toast.error('Ошибка при загрузке изображения в облако', { id: toastId });
+                },
+                async () => {
+                  const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+                  callback(downloadURL);
+                  toast.success('Изображение загружено', { id: toastId });
+                }
+              );
+            } catch (error) {
+              console.error('Upload error:', error);
+              toast.error('Ошибка при загрузке изображения', { id: toastId });
+            }
+          }, 'image/webp', 0.8);
+        };
+        img.src = event.target?.result as string;
       };
       reader.readAsDataURL(file);
+    } catch (error) {
+      console.error('File processing error:', error);
+      toast.error('Ошибка при обработке файла', { id: toastId });
     }
   };
 
@@ -507,23 +706,13 @@ export default function App() {
   const [selectedMessageId, setSelectedMessageId] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Состояния для сообществ
-  const [communitiesSearch, setCommunitiesSearch] = useState('');
-  const [activeCommunity, setActiveCommunity] = useState<any>(null);
-  const [activeChannel, setActiveChannel] = useState<any>(MOCK_CHANNELS[0]);
-  const [communityView, setCommunityView] = useState<'chat' | 'members'>('chat');
-  const [isCreatingCommunity, setIsCreatingCommunity] = useState(false);
-  const [communityName, setCommunityName] = useState('');
-  const [communityDescription, setCommunityDescription] = useState('');
-  const [communityAvatar, setCommunityAvatar] = useState<string | null>(null);
-  const [communityCover, setCommunityCover] = useState<string | null>(null);
-  const [isCommunitySettingsOpen, setIsCommunitySettingsOpen] = useState(false);
 
   const handleCreateCommunity = async () => {
     if (!currentUser || !communityName.trim()) return;
     try {
-      await addDoc(collection(db, 'communities'), {
+      const communityRef = await addDoc(collection(db, 'communities'), {
         name: communityName,
+        username: `@id${Math.random().toString(36).substring(2, 10)}`, // Temporary unique ID until we get the doc ID
         description: communityDescription,
         avatar: communityAvatar || DEFAULT_AVATAR,
         cover: communityCover || '',
@@ -532,6 +721,19 @@ export default function App() {
         isVerified: false,
         createdAt: new Date().toISOString()
       });
+      
+      // Update with actual doc ID based username
+      await updateDoc(communityRef, {
+        username: `@id${communityRef.id.substring(0, 8)}`
+      });
+      
+      // Add creator as member
+      await addDoc(collection(db, 'memberships'), {
+        userId: currentUser.uid,
+        communityId: communityRef.id,
+        joinedAt: new Date().toISOString()
+      });
+
       toast.success('Сообщество создано!');
       setIsCreatingCommunity(false);
       setCommunityName('');
@@ -540,6 +742,74 @@ export default function App() {
       setCommunityCover(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'communities');
+    }
+  };
+
+  const handleJoinCommunity = async (communityId: string) => {
+    if (!currentUser) return;
+    try {
+      await addDoc(collection(db, 'memberships'), {
+        userId: currentUser.uid,
+        communityId,
+        joinedAt: new Date().toISOString()
+      });
+      // Increment membersCount
+      const communityRef = doc(db, 'communities', communityId);
+      const communityDoc = await getDoc(communityRef);
+      if (communityDoc.exists()) {
+        await updateDoc(communityRef, {
+          membersCount: (communityDoc.data().membersCount || 0) + 1
+        });
+      }
+      toast.success('Вы вступили в сообщество!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'memberships');
+    }
+  };
+
+  const handleLeaveCommunity = async (communityId: string) => {
+    if (!currentUser) return;
+    try {
+      const membership = userMemberships.find(m => m.communityId === communityId);
+      if (membership) {
+        await deleteDoc(doc(db, 'memberships', membership.id));
+        // Decrement membersCount
+        const communityRef = doc(db, 'communities', communityId);
+        const communityDoc = await getDoc(communityRef);
+        if (communityDoc.exists()) {
+          await updateDoc(communityRef, {
+            membersCount: Math.max(0, (communityDoc.data().membersCount || 0) - 1)
+          });
+        }
+        toast.success('Вы вышли из сообщества');
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'memberships');
+    }
+  };
+
+  const handleCreateCommunityPost = async () => {
+    if (!currentUser || !activeCommunity || !newCommunityPostText.trim()) return;
+    setIsPostingToCommunity(true);
+    try {
+      await addDoc(collection(db, 'communities', activeCommunity.id, 'posts'), {
+        authorId: currentUser.uid,
+        authorName: currentUser.displayName,
+        authorPhoto: currentUser.photoURL,
+        authorIsVerified: currentUser.isVerified,
+        text: newCommunityPostText,
+        createdAt: new Date().toISOString(),
+        likes: 0,
+        comments: 0,
+        shares: 0,
+        views: 0
+      });
+      setNewCommunityPostText('');
+      toast.success('Пост опубликован!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `communities/${activeCommunity.id}/posts`);
+    } finally {
+      setIsPostingToCommunity(false);
     }
   };
 
@@ -566,8 +836,8 @@ export default function App() {
   }, [virtualChats]);
 
   const filteredCommunities = useMemo(() => {
-    return MOCK_COMMUNITIES.filter(c => c.name.toLowerCase().includes(communitiesSearch.toLowerCase()));
-  }, [communitiesSearch]);
+    return communities.filter(c => c.name.toLowerCase().includes(communitiesSearch.toLowerCase()));
+  }, [communities, communitiesSearch]);
 
   useEffect(() => {
     if (activeChat) {
@@ -691,7 +961,7 @@ export default function App() {
         if (!userDoc.exists()) {
           const newUserData = {
             uid: userCredential.user.uid,
-            username: userCredential.user.email?.split('@')[0] || `user_${userCredential.user.uid.substring(0, 5)}`,
+            username: `@id${userCredential.user.uid.substring(0, 8)}`,
             displayName: authName,
             email: userCredential.user.email,
             photoURL: DEFAULT_AVATAR,
@@ -1069,9 +1339,11 @@ export default function App() {
 
                   <div className="text-center mb-6">
                     <motion.h2 
+                      key={viewingProfile.name}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="text-3xl sm:text-4xl font-black leading-tight tracking-tighter text-vk-text flex items-center justify-center gap-2"
+                      whileHover={{ scale: 1.02, color: '#120a8f' }}
+                      className="text-3xl sm:text-4xl font-black leading-tight tracking-tighter text-vk-text flex items-center justify-center gap-2 cursor-default transition-all"
                     >
                       {viewingProfile.name}
                       <div className="flex items-center gap-1">
@@ -1081,13 +1353,27 @@ export default function App() {
                       </div>
                     </motion.h2>
                     <div className="flex items-center justify-center gap-2 mt-2 mb-2">
+                      <p className="text-sm font-bold text-vk-text-muted">{viewingProfile.username || `@id${viewingProfile.id?.substring(0, 8)}`}</p>
+                      {viewingProfile.specialization && (
+                        <>
+                          <span className="text-vk-text-muted">•</span>
+                          <span className="text-[10px] font-bold text-vk-accent uppercase tracking-widest bg-vk-accent/5 px-2 py-0.5 rounded-md border border-vk-accent/10">
+                            {viewingProfile.specialization}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-center gap-2 mt-2 mb-2">
                       {viewingProfile.isOnline ? (
                         <div className="flex items-center gap-2 bg-green-50 px-3 py-1 rounded-full border border-green-100">
                           <span className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse"></span>
                           <span className="text-xs font-bold text-green-600 uppercase tracking-widest">В сети</span>
                         </div>
                       ) : (
-                        <span className="text-xs font-bold text-vk-text-muted uppercase tracking-widest">{viewingProfile.lastSeen || 'Был(а) недавно'}</span>
+                        <div className="flex items-center gap-2 bg-gray-50 px-3 py-1 rounded-full border border-gray-100">
+                          <span className="w-2 h-2 rounded-full bg-gray-300"></span>
+                          <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">Был(а) {viewingProfile.lastSeen || 'недавно'}</span>
+                        </div>
                       )}
                     </div>
                     <p className="text-vk-text-muted text-sm font-bold uppercase tracking-widest mt-1 opacity-60">@{viewingProfile.id} • Москва, Россия</p>
@@ -1107,18 +1393,33 @@ export default function App() {
                   )}
 
                   <div className="flex flex-wrap justify-center gap-2.5 mb-8">
-                    {['Музыка', 'Дизайн', 'Спорт', 'Путешествия'].map((tag, idx) => (
-                      <motion.span 
-                        key={tag}
-                        whileHover={{ scale: 1.05, backgroundColor: 'rgba(18, 10, 143, 0.1)' }}
-                        initial={{ opacity: 0, scale: 0.8 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: 0.3 + idx * 0.05 }}
-                        className="bg-black/5 text-vk-text px-4 py-2 rounded-2xl text-[11px] font-bold uppercase tracking-widest cursor-pointer transition-all border border-black/5"
-                      >
-                        {tag}
-                      </motion.span>
-                    ))}
+                    {viewingProfile.interests && viewingProfile.interests.length > 0 ? (
+                      viewingProfile.interests.map((tag, idx) => (
+                        <motion.span 
+                          key={tag}
+                          whileHover={{ scale: 1.05, backgroundColor: 'rgba(18, 10, 143, 0.1)' }}
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ delay: 0.3 + idx * 0.05 }}
+                          className="bg-black/5 text-vk-text px-4 py-2 rounded-2xl text-[11px] font-bold uppercase tracking-widest cursor-pointer transition-all border border-black/5"
+                        >
+                          {tag}
+                        </motion.span>
+                      ))
+                    ) : (
+                      ['Музыка', 'Дизайн', 'Спорт', 'Путешествия'].map((tag, idx) => (
+                        <motion.span 
+                          key={tag}
+                          whileHover={{ scale: 1.05, backgroundColor: 'rgba(18, 10, 143, 0.1)' }}
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ delay: 0.3 + idx * 0.05 }}
+                          className="bg-black/5 text-vk-text px-4 py-2 rounded-2xl text-[11px] font-bold uppercase tracking-widest cursor-pointer transition-all border border-black/5"
+                        >
+                          {tag}
+                        </motion.span>
+                      ))
+                    )}
                   </div>
 
                   <div className="flex gap-4 w-full sm:w-auto">
@@ -1415,10 +1716,13 @@ export default function App() {
                 </div>
                 <div className="flex-1 overflow-hidden">
                   <div className="flex justify-between items-center mb-1">
-                    <h4 className="text-base font-bold text-vk-text truncate flex items-center gap-1">
+                    <motion.h4 
+                      whileHover={{ x: 3, color: '#120a8f' }}
+                      className="text-base font-bold text-vk-text truncate flex items-center gap-1 transition-colors"
+                    >
                       Gemini AI
                       <Badge type="verified" size={14} />
-                    </h4>
+                    </motion.h4>
                     <span className="text-[10px] font-bold text-vk-accent uppercase tracking-wider shrink-0">AI Bot</span>
                   </div>
                   <p className="text-sm text-vk-text-muted truncate">Привет! Я Gemini AI. Чем могу помочь?</p>
@@ -1500,17 +1804,29 @@ export default function App() {
                         <p className="text-sm font-medium">Нет сообществ</p>
                       </div>
                     ) : (
-                      filteredCommunities.map(community => (
-                        <CommunityItem 
-                          key={community.id} 
-                          community={community} 
-                          onClick={() => {
-                            setActiveCommunity(community);
-                            setActiveChannel(MOCK_CHANNELS[0]);
-                            setCommunityView('chat');
-                          }} 
-                        />
-                      ))
+                      filteredCommunities.map(community => {
+                        const isMember = userMemberships.some(m => m.communityId === community.id);
+                        return (
+                          <CommunityItem 
+                            key={community.id} 
+                            community={community} 
+                            isMember={isMember}
+                            onJoin={(e) => {
+                              e.stopPropagation();
+                              handleJoinCommunity(community.id);
+                            }}
+                            onLeave={(e) => {
+                              e.stopPropagation();
+                              handleLeaveCommunity(community.id);
+                            }}
+                            onClick={() => {
+                              setActiveCommunity(community);
+                              setActiveChannel(MOCK_CHANNELS[0]);
+                              setCommunityView('chat');
+                            }} 
+                          />
+                        );
+                      })
                     )}
                   </div>
                 </>
@@ -1555,7 +1871,12 @@ export default function App() {
                               <img src={profile.photoURL} alt={profile.hubName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                             </div>
                             <div className="flex-1 overflow-hidden">
-                              <h4 className="text-base font-bold text-vk-text truncate">{profile.hubName}</h4>
+                              <motion.h4 
+                                whileHover={{ x: 5, color: '#120a8f' }}
+                                className="text-base font-bold text-vk-text truncate transition-colors"
+                              >
+                                {profile.hubName}
+                              </motion.h4>
                               <p className="text-sm text-vk-text-muted truncate">{profile.specialization || 'Пользователь хаба'}</p>
                             </div>
                             <button className="w-10 h-10 rounded-full bg-vk-accent/10 text-vk-accent flex items-center justify-center hover:bg-vk-accent/20 transition-colors">
@@ -1689,18 +2010,35 @@ export default function App() {
                 </div>
 
                 <div className="relative h-32 sm:h-48 w-full mb-12">
-                  <img src={DEFAULT_COVER} alt="Cover" className="absolute inset-0 w-full h-full object-cover opacity-70" referrerPolicy="no-referrer" />
+                  <img src={editProfileCover || DEFAULT_COVER} alt="Cover" className="absolute inset-0 w-full h-full object-cover opacity-70" referrerPolicy="no-referrer" />
                   <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
-                    <button className="bg-black/50 text-white px-4 py-2 rounded-full flex items-center gap-2  hover:bg-black/60 transition-colors">
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      className="hidden" 
+                      ref={userCoverInputRef}
+                      onChange={(e) => handleFileSelect(e, setEditProfileCover)}
+                    />
+                    <button 
+                      onClick={() => userCoverInputRef.current?.click()}
+                      className="bg-black/50 text-white px-4 py-2 rounded-full flex items-center gap-2  hover:bg-black/60 transition-colors"
+                    >
                       <Camera size={18} />
                       <span className="text-sm font-medium">Изменить обложку</span>
                     </button>
                   </div>
                   <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center">
-                    <div className="relative group cursor-pointer">
+                    <div className="relative group cursor-pointer" onClick={() => userAvatarInputRef.current?.click()}>
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        className="hidden" 
+                        ref={userAvatarInputRef}
+                        onChange={(e) => handleFileSelect(e, setEditProfileAvatar)}
+                      />
                       <div className="w-24 h-24 rounded-full bg-vk-panel border-4 border-vk-bg shadow-md overflow-hidden relative">
-                        <img src="https://picsum.photos/seed/user/200/200" alt="Avatar" className="w-full h-full object-cover opacity-60" referrerPolicy="no-referrer" />
-                        <div className="absolute inset-0 flex items-center justify-center text-white drop-shadow-md">
+                        <img src={editProfileAvatar || DEFAULT_AVATAR} alt="Avatar" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        <div className="absolute inset-0 flex items-center justify-center text-white drop-shadow-md bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity">
                           <Camera size={24} />
                         </div>
                       </div>
@@ -1710,17 +2048,19 @@ export default function App() {
 
                 <div className="px-4 pb-8 max-w-md mx-auto w-full mt-4">
                   <div className="space-y-6">
-                    {/* Блок: О себе */}
+                    {/* Блок: Био */}
                     <div className="bg-vk-panel rounded-3xl p-1.5 shadow-sm border border-vk-border/40">
-                      <div className="px-4 py-3">
-                        <label className="text-[11px] font-bold text-vk-text-muted uppercase tracking-wider">О себе</label>
+                      <div className="px-4 py-3 flex items-center justify-between">
+                        <label className="text-[11px] font-bold text-vk-text-muted uppercase tracking-wider">Био (О себе)</label>
+                        <span className="text-[10px] text-vk-text-muted">{editProfileAbout.length}/1000</span>
                       </div>
                       <div className="px-2 pb-2">
                         <textarea 
-                          placeholder="Расскажите немного о себе..." 
-                          rows={3}
+                          placeholder="Расскажите немного о себе, своих увлечениях или целях..." 
+                          rows={4}
                           className="w-full bg-vk-bg border-none rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-vk-accent/50 text-sm font-medium transition-all resize-none"
-                          defaultValue="Создаю красивые интерфейсы и пишу чистый код. &#10;Всегда в поиске вдохновения! ✨"
+                          value={editProfileAbout}
+                          onChange={(e) => setEditProfileAbout(e.target.value)}
                         />
                       </div>
                     </div>
@@ -1728,35 +2068,82 @@ export default function App() {
                     {/* Блок: Основное */}
                     <div className="bg-vk-panel rounded-3xl p-1.5 shadow-sm border border-vk-border/40">
                       <div className="px-4 py-3">
-                        <label className="text-[11px] font-bold text-vk-text-muted uppercase tracking-wider">Основное</label>
+                        <label className="text-[11px] font-bold text-vk-text-muted uppercase tracking-wider">Основная информация</label>
                       </div>
                       <div className="px-2 pb-2 space-y-2">
-                        <input type="text" placeholder="Имя и фамилия" className="w-full bg-vk-bg border-none rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-vk-accent/50 text-sm font-medium transition-all" />
-                        <select defaultValue="" className="w-full bg-vk-bg border-none rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-vk-accent/50 text-sm font-medium appearance-none text-vk-text transition-all">
-                          <option value="" disabled>Пол</option>
-                          <option value="male">Мужской</option>
-                          <option value="female">Женский</option>
-                        </select>
-                        <input type="text" placeholder="User ID" className="w-full bg-vk-bg border-none rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-vk-accent/50 text-sm font-medium transition-all" />
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-bold text-vk-text-muted ml-4 uppercase tracking-tighter">Имя и фамилия</p>
+                          <input 
+                            type="text" 
+                            placeholder="Как вас зовут?" 
+                            className="w-full bg-vk-bg border-none rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-vk-accent/50 text-sm font-medium transition-all" 
+                            value={editProfileName}
+                            onChange={(e) => setEditProfileName(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-bold text-vk-text-muted ml-4 uppercase tracking-tighter">Специализация</p>
+                          <input 
+                            type="text" 
+                            placeholder="Чем вы занимаетесь? (например, Дизайнер)" 
+                            className="w-full bg-vk-bg border-none rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-vk-accent/50 text-sm font-medium transition-all" 
+                            value={editProfileSpec}
+                            onChange={(e) => setEditProfileSpec(e.target.value)}
+                          />
+                        </div>
                       </div>
                     </div>
 
-                    {/* Блок: Контакты */}
+                    {/* Блок: Интересы */}
                     <div className="bg-vk-panel rounded-3xl p-1.5 shadow-sm border border-vk-border/40">
                       <div className="px-4 py-3">
-                        <label className="text-[11px] font-bold text-vk-text-muted uppercase tracking-wider">Контакты</label>
+                        <label className="text-[11px] font-bold text-vk-text-muted uppercase tracking-wider">Интересы</label>
                       </div>
-                      <div className="px-2 pb-2 space-y-2">
-                        <div className="flex gap-2">
-                          <input type="text" placeholder="Страна" className="w-1/2 bg-vk-bg border-none rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-vk-accent/50 text-sm font-medium transition-all" />
-                          <input type="text" placeholder="Город" className="w-1/2 bg-vk-bg border-none rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-vk-accent/50 text-sm font-medium transition-all" />
+                      <div className="px-2 pb-2">
+                        <input 
+                          type="text" 
+                          placeholder="Добавьте интересы через запятую..." 
+                          className="w-full bg-vk-bg border-none rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-vk-accent/50 text-sm font-medium transition-all mb-3" 
+                          value={editProfileInterests}
+                          onChange={(e) => setEditProfileInterests(e.target.value)}
+                        />
+                        <div className="flex flex-wrap gap-1.5 px-2">
+                          {editProfileInterests.split(',').map(i => i.trim()).filter(i => i).map((interest, idx) => (
+                            <span key={idx} className="bg-vk-accent/10 text-vk-accent px-2.5 py-1 rounded-lg text-[11px] font-bold uppercase tracking-tight">
+                              {interest}
+                            </span>
+                          ))}
                         </div>
-                        <input type="email" placeholder="Email адрес" className="w-full bg-vk-bg border-none rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-vk-accent/50 text-sm font-medium transition-all" />
                       </div>
                     </div>
 
                     <button 
-                      onClick={() => setIsEditingProfile(false)} 
+                      onClick={async () => {
+                        if (currentUser) {
+                          try {
+                            const userDocRef = doc(db, 'users', currentUser.uid);
+                            const updatedData = {
+                              ...currentUser,
+                              displayName: editProfileName,
+                              photoURL: editProfileAvatar,
+                              cover: editProfileCover,
+                              about: editProfileAbout,
+                              specialization: editProfileSpec,
+                              interests: editProfileInterests.split(',').map(i => i.trim()).filter(i => i),
+                            };
+                            await updateDoc(userDocRef, updatedData);
+                            await updateProfile(auth.currentUser!, {
+                              displayName: editProfileName,
+                              ...(editProfileAvatar ? { photoURL: editProfileAvatar } : {})
+                            });
+                            setCurrentUser(updatedData);
+                            setIsEditingProfile(false);
+                            toast.success('Профиль обновлен!');
+                          } catch (error) {
+                            handleFirestoreError(error, OperationType.UPDATE, `users/${currentUser.uid}`);
+                          }
+                        }
+                      }} 
                       className="w-full bg-vk-accent text-white font-bold rounded-2xl px-4 py-4 mt-4 shadow-lg shadow-vk-accent/20 hover:opacity-90 active:scale-[0.98] transition-all"
                     >
                       Сохранить изменения
@@ -1816,23 +2203,36 @@ export default function App() {
                       {isSettingsOpen && (
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setIsSettingsOpen(false)} />
-                          <motion.div 
-                            initial={{ opacity: 0, scale: 0.95, y: -10 }}
-                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                            className="absolute right-0 mt-2 w-48 bg-white border border-black/5 rounded-3xl shadow-2xl py-2 z-50 overflow-hidden"
-                          >
-                            <button 
-                              onClick={async () => {
-                                setIsSettingsOpen(false);
-                                await signOut(auth);
-                                setActiveTab('home');
-                              }} 
-                              className="w-full flex items-center gap-3 px-4 py-3 text-red-500 hover:bg-red-50 transition-colors text-sm font-bold outline-none"
+                            <motion.div 
+                              initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                              animate={{ opacity: 1, scale: 1, y: 0 }}
+                              className="absolute right-0 mt-2 w-56 bg-white border border-black/5 rounded-3xl shadow-2xl py-2 z-50 overflow-hidden"
                             >
-                              <LogOut size={18} />
-                              Выйти из аккаунта
-                            </button>
-                          </motion.div>
+                              {isAdmin && (
+                                <button 
+                                  onClick={() => {
+                                    setIsSettingsOpen(false);
+                                    setIsAdminPanelOpen(true);
+                                  }} 
+                                  className="w-full flex items-center gap-3 px-4 py-3 text-vk-text hover:bg-black/5 transition-colors text-sm font-bold outline-none"
+                                >
+                                  <ShieldAlert size={18} className="text-red-500" />
+                                  Админ-панель
+                                </button>
+                              )}
+                              
+                              <button 
+                                onClick={async () => {
+                                  setIsSettingsOpen(false);
+                                  await signOut(auth);
+                                  setActiveTab('home');
+                                }} 
+                                className="w-full flex items-center gap-3 px-4 py-3 text-red-500 hover:bg-red-50 transition-colors text-sm font-bold outline-none"
+                              >
+                                <LogOut size={18} />
+                                Выйти из аккаунта
+                              </button>
+                            </motion.div>
                         </>
                       )}
                     </div>
@@ -1856,11 +2256,22 @@ export default function App() {
 
                     <div className="text-center mb-5">
                       <h2 className="text-3xl font-extrabold leading-tight tracking-tight text-vk-text flex flex-col items-center gap-2">
-                        <div className="flex items-center gap-2">
+                        <motion.div 
+                          key={currentUser?.displayName}
+                          initial={{ opacity: 0, y: 5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          whileHover={{ scale: 1.02, color: '#120a8f' }}
+                          className="flex items-center gap-2 cursor-default transition-colors"
+                        >
                           {currentUser?.displayName || 'Имя Пользователя'}
                           <Badge type="verified" size={24} />
-                        </div>
+                        </motion.div>
                         <div className="flex items-center gap-1.5">
+                          {currentUser?.specialization && (
+                            <span className="text-xs font-bold text-vk-accent uppercase tracking-widest bg-vk-accent/5 px-2 py-0.5 rounded-md border border-vk-accent/10 mb-1">
+                              {currentUser.specialization}
+                            </span>
+                          )}
                           {isAdmin && (
                             <>
                               <Badge type="creator" size={20} />
@@ -1874,28 +2285,44 @@ export default function App() {
                         <span className="text-sm font-medium text-green-600">В сети</span>
                       </div>
                       
-                      {/* Прогресс уровня удален */}
-
-                      <p className="text-vk-text-muted text-sm font-medium">@username • Москва, Россия</p>
+                      <p className="text-vk-text-muted text-sm font-medium">{currentUser?.username || `@id${currentUser?.uid?.substring(0, 8)}`} • Москва, Россия</p>
                     </div>
 
                     <motion.div 
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: 0.2, duration: 0.5 }}
-                      className="text-center px-4 mb-6 text-sm text-vk-text leading-relaxed italic"
+                      className="text-center px-4 mb-6 text-sm text-vk-text leading-relaxed italic max-w-sm mx-auto"
                     >
-                      "Создаю красивые интерфейсы и пишу чистый код. <br/> Всегда в поиске вдохновения! ✨"
+                      {currentUser?.about || "Создаю красивые интерфейсы и пишу чистый код. Всегда в поиске вдохновения! ✨"}
                     </motion.div>
 
                     <div className="flex flex-wrap justify-center gap-2 mb-6">
-                      <span className="bg-vk-accent/10 text-vk-accent px-3 py-1 rounded-full text-sm font-medium cursor-pointer hover:bg-vk-accent/20 transition-colors">Программирование</span>
-                      <span className="bg-vk-accent/10 text-vk-accent px-3 py-1 rounded-full text-sm font-medium cursor-pointer hover:bg-vk-accent/20 transition-colors">Технологии</span>
-                      <span className="bg-vk-accent/10 text-vk-accent px-3 py-1 rounded-full text-sm font-medium cursor-pointer hover:bg-vk-accent/20 transition-colors">Игры</span>
+                      {currentUser?.interests && currentUser.interests.length > 0 ? (
+                        currentUser.interests.map((interest: string, idx: number) => (
+                          <span key={idx} className="bg-vk-accent/10 text-vk-accent px-3 py-1 rounded-full text-sm font-medium cursor-pointer hover:bg-vk-accent/20 transition-colors">
+                            {interest}
+                          </span>
+                        ))
+                      ) : (
+                        <>
+                          <span className="bg-vk-accent/10 text-vk-accent px-3 py-1 rounded-full text-sm font-medium cursor-pointer hover:bg-vk-accent/20 transition-colors">Программирование</span>
+                          <span className="bg-vk-accent/10 text-vk-accent px-3 py-1 rounded-full text-sm font-medium cursor-pointer hover:bg-vk-accent/20 transition-colors">Технологии</span>
+                          <span className="bg-vk-accent/10 text-vk-accent px-3 py-1 rounded-full text-sm font-medium cursor-pointer hover:bg-vk-accent/20 transition-colors">Игры</span>
+                        </>
+                      )}
                     </div>
 
                     <button 
-                      onClick={() => setIsEditingProfile(true)}
+                      onClick={() => {
+                        setEditProfileName(currentUser?.displayName || '');
+                        setEditProfileAbout(currentUser?.about || '');
+                        setEditProfileSpec(currentUser?.specialization || '');
+                        setEditProfileInterests(currentUser?.interests?.join(', ') || '');
+                        setEditProfileAvatar(currentUser?.photoURL || DEFAULT_AVATAR);
+                        setEditProfileCover(currentUser?.cover || DEFAULT_COVER);
+                        setIsEditingProfile(true);
+                      }}
                       className="bg-vk-panel border border-black/10 text-vk-text px-8 py-3 rounded-full font-semibold text-base shadow-lg hover:bg-black/5 active:scale-95 transition-all "
                     >
                       Редактировать профиль
@@ -2131,6 +2558,7 @@ export default function App() {
                     setViewingProfile({ 
                       id: activeChat.id, 
                       name: activeChat.name, 
+                      username: activeChat.username,
                       avatar: activeChat.avatar, 
                       isFriend: true, 
                       isOnline: activeChat.isOnline, 
@@ -2148,7 +2576,15 @@ export default function App() {
                   </div>
                   <div>
                     <h3 className="font-bold text-vk-text text-base leading-tight flex items-center gap-1">
-                      {activeChat.name}
+                      <motion.span
+                        key={activeChat.name}
+                        initial={{ opacity: 0, x: -5 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        whileHover={{ scale: 1.02, color: '#120a8f' }}
+                        className="cursor-default transition-colors"
+                      >
+                        {activeChat.name}
+                      </motion.span>
                       <div className="flex items-center gap-0.5">
                         {activeChat.isCreator && <Badge type="creator" size={14} />}
                         {activeChat.isAdmin && <Badge type="admin" size={14} />}
@@ -2359,18 +2795,53 @@ export default function App() {
               </div>
             </div>
             
-            <div className="px-6 pt-12 pb-6 bg-white border-b border-black/5 shrink-0 shadow-sm">
-              <h2 className="text-2xl font-bold text-vk-text leading-tight tracking-tight">{activeCommunity.name}</h2>
-              <div className="flex items-center gap-2 mt-1.5">
-                <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-widest">{activeCommunity.members} участников</p>
-                <div className="w-1 h-1 bg-black/10 rounded-full" />
-                <p className="text-[10px] font-bold text-green-500 uppercase tracking-widest">в сети</p>
+            <div className="px-6 pt-12 pb-6 bg-white border-b border-black/5 shrink-0 shadow-sm flex justify-between items-end">
+              <div>
+                <motion.h2 
+                  key={activeCommunity.name}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  whileHover={{ x: 2, color: '#120a8f' }}
+                  className="text-2xl font-bold text-vk-text leading-tight tracking-tight cursor-default transition-colors"
+                >
+                  {activeCommunity.name}
+                </motion.h2>
+                <div className="flex items-center gap-2 mt-1.5">
+                  <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-widest">{activeCommunity.username || `@id${activeCommunity.id?.substring(0, 8)}`}</p>
+                  <div className="w-1 h-1 bg-black/10 rounded-full" />
+                  <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-widest">{activeCommunity.membersCount || 0} участников</p>
+                  <div className="w-1 h-1 bg-black/10 rounded-full" />
+                  <p className="text-[10px] font-bold text-green-500 uppercase tracking-widest">в сети</p>
+                </div>
               </div>
+              {userMemberships.some(m => m.communityId === activeCommunity.id) ? (
+                <button 
+                  onClick={() => handleLeaveCommunity(activeCommunity.id)}
+                  className="px-6 py-2 bg-red-50 text-red-500 hover:bg-red-100 rounded-2xl text-sm font-bold transition-all shadow-sm"
+                >
+                  Выйти
+                </button>
+              ) : (
+                <button 
+                  onClick={() => handleJoinCommunity(activeCommunity.id)}
+                  className="px-6 py-2 bg-[#120a8f] text-white hover:opacity-90 rounded-2xl text-sm font-bold transition-all shadow-md shadow-[#120a8f]/20"
+                >
+                  Вступить
+                </button>
+              )}
             </div>
 
             {/* Channels & Tabs Navigation */}
             <div className="bg-white border-b border-black/5 shrink-0 z-10">
               <div className="flex gap-3 px-6 py-3 overflow-x-auto no-scrollbar">
+                <motion.button 
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setCommunityView('feed')}
+                  className={`flex items-center gap-2.5 px-5 py-2.5 rounded-2xl text-xs font-bold uppercase tracking-wider whitespace-nowrap transition-all shadow-sm ${communityView === 'feed' ? 'bg-blue-600 text-white' : 'bg-black/5 text-vk-text hover:bg-black/10'}`}
+                >
+                  <LayoutGrid size={18} /> Лента
+                </motion.button>
                 {MOCK_CHANNELS.map(ch => (
                   <motion.button 
                     key={ch.id}
@@ -2395,6 +2866,48 @@ export default function App() {
 
             {/* Content Area */}
             <div className="flex-1 overflow-hidden relative flex flex-col bg-vk-bg">
+              {communityView === 'feed' && (
+                <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                  {/* Create Post */}
+                  {userMemberships.some(m => m.communityId === activeCommunity.id) && (
+                    <div className="bg-white rounded-3xl p-5 shadow-sm border border-black/5">
+                      <div className="flex gap-4">
+                        <div className="w-12 h-12 rounded-2xl overflow-hidden shrink-0 shadow-sm">
+                          <img src={currentUser?.photoURL || ''} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        </div>
+                        <textarea
+                          value={newCommunityPostText}
+                          onChange={e => setNewCommunityPostText(e.target.value)}
+                          placeholder="Что нового в сообществе?"
+                          className="flex-1 bg-black/5 border-none focus:ring-0 rounded-2xl p-4 text-sm resize-none min-h-[100px] transition-colors focus:bg-white focus:shadow-sm"
+                        />
+                      </div>
+                      <div className="flex justify-end mt-4">
+                        <button
+                          disabled={!newCommunityPostText.trim() || isPostingToCommunity}
+                          onClick={handleCreateCommunityPost}
+                          className="px-8 py-2.5 bg-[#120a8f] text-white rounded-2xl text-sm font-bold shadow-md shadow-[#120a8f]/20 hover:opacity-90 transition-all disabled:opacity-50 disabled:shadow-none"
+                        >
+                          {isPostingToCommunity ? 'Публикация...' : 'Опубликовать'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Posts Feed */}
+                  {communityPosts.length === 0 ? (
+                    <div className="text-center py-20 bg-white rounded-3xl border border-black/5 shadow-sm">
+                      <LayoutGrid size={48} className="mx-auto text-vk-text-muted/30 mb-4" />
+                      <p className="text-vk-text-muted font-medium">В этом сообществе пока нет постов</p>
+                    </div>
+                  ) : (
+                    communityPosts.map(post => (
+                      <PostItem key={post.id} post={post} />
+                    ))
+                  )}
+                </div>
+              )}
+
               {communityView === 'chat' ? (
                 <>
                   <div className="flex-1 overflow-y-auto p-4 space-y-5">
@@ -2829,6 +3342,34 @@ export default function App() {
                       <Activity className="text-green-500 mb-3" size={32} />
                       <p className="text-3xl font-black text-vk-text mb-1">3,421</p>
                       <p className="text-[10px] font-bold text-vk-text-muted uppercase tracking-wider">Активные сегодня</p>
+                    </div>
+                    
+                    {/* Seed Data Action */}
+                    <div className="col-span-2 sm:col-span-4 bg-vk-accent/5 p-6 rounded-3xl border border-vk-accent/10 flex flex-col sm:flex-row items-center justify-between gap-4 mt-4">
+                      <div className="text-center sm:text-left">
+                        <h4 className="font-bold text-vk-text text-lg">Тестовые данные</h4>
+                        <p className="text-sm text-vk-text-muted">Наполните базу данных тестовыми пользователями и сообществами для проверки функционала.</p>
+                      </div>
+                      <button 
+                        onClick={async () => {
+                          if (!currentUser) return;
+                          setIsSeeding(true);
+                          const toastId = toast.loading('Наполняем базу данных...');
+                          try {
+                            await seedTestData(currentUser.uid);
+                            toast.success('База данных успешно наполнена!', { id: toastId });
+                          } catch (error) {
+                            console.error(error);
+                            toast.error('Ошибка при наполнении базы данных', { id: toastId });
+                          } finally {
+                            setIsSeeding(false);
+                          }
+                        }}
+                        disabled={isSeeding}
+                        className="bg-vk-accent text-white px-8 py-3 rounded-2xl font-bold shadow-lg shadow-vk-accent/20 hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100 whitespace-nowrap"
+                      >
+                        {isSeeding ? 'Загрузка...' : 'Наполнить базу'}
+                      </button>
                     </div>
                   </motion.div>
                 )}

@@ -82,6 +82,18 @@
     "/communities/{communityId}": {
       "schema": "Community",
       "description": "Community documents"
+    },
+    "/communities/{communityId}/members/{userId}": {
+      "schema": "object",
+      "description": "Members of the community"
+    },
+    "/communities/{communityId}/posts/{postId}": {
+      "schema": "Post",
+      "description": "Posts in the community"
+    },
+    "/memberships/{membershipId}": {
+      "schema": "object",
+      "description": "User memberships in communities"
     }
   }
 }
