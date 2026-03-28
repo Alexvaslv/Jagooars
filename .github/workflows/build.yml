@@ -1,0 +1,34 @@
+
+name: Build APK
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Клонируем репозиторий
+        uses: actions/checkout@v3
+
+      - name: ☕ Устанавливаем Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: ⚙️ Устанавливаем Android SDK
+        uses: android-actions/setup-android@v2
+
+      - name: 🔨 Собираем APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: 📦 Загружаем APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: app
+          path: app/build/outputs/apk/debug/app-debug.apk
