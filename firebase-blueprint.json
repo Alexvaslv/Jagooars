@@ -1,0 +1,87 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "username": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "photoURL": { "type": "string", "format": "uri" },
+        "isVerified": { "type": "boolean" },
+        "isAdmin": { "type": "boolean" },
+        "isCreator": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "username", "displayName", "email"]
+    },
+    "HubProfile": {
+      "title": "HubProfile",
+      "description": "Detailed profile for the Hub",
+      "type": "object",
+      "properties": {
+        "hubName": { "type": "string" },
+        "specialization": { "type": "string" },
+        "about": { "type": "string" },
+        "interests": { "type": "array", "items": { "type": "string" } },
+        "photoURL": { "type": "string", "format": "uri" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["hubName", "specialization"]
+    },
+    "Post": {
+      "title": "Post",
+      "description": "User publication",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorPhoto": { "type": "string", "format": "uri" },
+        "authorIsVerified": { "type": "boolean" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "likes": { "type": "integer" },
+        "comments": { "type": "integer" },
+        "shares": { "type": "integer" },
+        "views": { "type": "integer" }
+      },
+      "required": ["authorId", "text", "createdAt"]
+    },
+    "Community": {
+      "title": "Community",
+      "description": "Group or community",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "avatar": { "type": "string", "format": "uri" },
+        "cover": { "type": "string", "format": "uri" },
+        "creatorId": { "type": "string" },
+        "membersCount": { "type": "integer" },
+        "isVerified": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "creatorId", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User documents"
+    },
+    "/hub_profiles/{userId}": {
+      "schema": "HubProfile",
+      "description": "Hub profile documents"
+    },
+    "/posts/{postId}": {
+      "schema": "Post",
+      "description": "Post documents"
+    },
+    "/communities/{communityId}": {
+      "schema": "Community",
+      "description": "Community documents"
+    }
+  }
+}

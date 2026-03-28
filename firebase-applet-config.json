@@ -1,10 +1,10 @@
 {
-  "projectId": "project-632448e3-25d2-46ca-b4f",
-  "appId": "1:427357743326:web:99702c7be9791616c0fa4f",
-  "apiKey": "AIzaSyBLfQA7jvSXyRG76r4OcaYuAjB3aT-pVvY",
-  "authDomain": "project-632448e3-25d2-46ca-b4f.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-ac883b78-0250-46e7-9d01-e433ae8b73f6",
-  "storageBucket": "project-632448e3-25d2-46ca-b4f.firebasestorage.app",
-  "messagingSenderId": "427357743326",
+  "projectId": "chat-im-491314",
+  "appId": "1:214590267112:web:781719e5f294ca0dbe735d",
+  "apiKey": "AIzaSyBK3-8DSTWgImvmfrv2e8HhHmCx1UiA0bs",
+  "authDomain": "chat-im-491314.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-e09c4c0f-f7ff-4e55-898e-f749a9949f2a",
+  "storageBucket": "chat-im-491314.firebasestorage.app",
+  "messagingSenderId": "214590267112",
   "measurementId": ""
 }

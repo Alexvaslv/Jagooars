@@ -234,6 +234,57 @@ const ADMIN_TABS = [
   { id: 'settings', label: 'Настройки', icon: Settings },
 ];
 
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, error: Error | null }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("ErrorBoundary caught an error", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      let errorMessage = "Что-то пошло не так. Пожалуйста, попробуйте позже.";
+      try {
+        if (this.state.error?.message) {
+          const parsedError = JSON.parse(this.state.error.message);
+          if (parsedError.error && parsedError.error.includes('permission-denied')) {
+            errorMessage = "У вас недостаточно прав для выполнения этой операции.";
+          }
+        }
+      } catch (e) {
+        // Not a JSON error, use default
+      }
+
+      return (
+        <div className="flex flex-col items-center justify-center min-h-screen bg-[#f0f2f5] p-4 text-center">
+          <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full">
+            <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <X size={32} />
+            </div>
+            <h2 className="text-2xl font-bold text-[#222222] mb-2">Ой! Ошибка</h2>
+            <p className="text-[#666666] mb-6">{errorMessage}</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full py-3 bg-[#0077ff] text-white rounded-xl font-semibold hover:bg-[#0066ee] transition-colors"
+            >
+              Обновить страницу
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 export default function App() {
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -242,10 +293,15 @@ export default function App() {
   const isVerified = currentUser?.isVerified || false;
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
+  const [authConfirmPassword, setAuthConfirmPassword] = useState('');
   const [authName, setAuthName] = useState('');
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
   const [isIntroPlaying, setIsIntroPlaying] = useState(true);
+
+  useEffect(() => {
+    console.log("App state:", { isAuthReady, currentUser: !!currentUser, isIntroPlaying });
+  }, [isAuthReady, currentUser, isIntroPlaying]);
   const [activeTab, setActiveTab] = useState('home');
   const [hubView, setHubView] = useState<'communities' | 'profiles'>('communities');
   const [isCreatingHubProfile, setIsCreatingHubProfile] = useState(false);
@@ -297,9 +353,11 @@ export default function App() {
   };
 
   useEffect(() => {
+    console.log("Current domain:", window.location.hostname);
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        try {
+      console.log("Auth state changed:", user?.uid);
+      try {
+        if (user) {
           const userDocRef = doc(db, 'users', user.uid);
           const userDoc = await getDoc(userDocRef);
           
@@ -347,15 +405,37 @@ export default function App() {
               setCurrentUser(data);
             }
           }
-        } catch (error) {
-          handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+        } else {
+          setCurrentUser(null);
         }
-      } else {
-        setCurrentUser(null);
+      } catch (error) {
+        console.error("Auth state error:", error);
+        // If it's a permission error, we still want to let the user in (they might see the login screen)
+        if (user) {
+          setCurrentUser({
+            uid: user.uid,
+            displayName: user.displayName || 'Пользователь',
+            email: user.email,
+            photoURL: user.photoURL || DEFAULT_AVATAR,
+            isVerified: false,
+            isAdmin: false,
+            isCreator: false
+          });
+        }
+      } finally {
+        setIsAuthReady(true);
       }
-      setIsAuthReady(true);
     });
-    return () => unsubscribe();
+
+    // Safety timeout: if auth hasn't initialized in 10 seconds, show the login screen anyway
+    const safetyTimer = setTimeout(() => {
+      setIsAuthReady(true);
+    }, 10000);
+
+    return () => {
+      unsubscribe();
+      clearTimeout(safetyTimer);
+    };
   }, []);
   
   useEffect(() => {
@@ -591,6 +671,10 @@ export default function App() {
       toast.error('Пожалуйста, введите имя');
       return;
     }
+    if (!isLoginMode && authPassword !== authConfirmPassword) {
+      toast.error('Пароли не совпадают');
+      return;
+    }
 
     setAuthLoading(true);
     try {
@@ -623,6 +707,7 @@ export default function App() {
         toast.success('Регистрация успешна!');
       }
     } catch (error: any) {
+      console.error("Auth error:", error);
       let errorMessage = 'Произошла ошибка';
       if (error.code === 'auth/email-already-in-use') errorMessage = 'Этот email уже используется';
       else if (error.code === 'auth/invalid-email') errorMessage = 'Неверный формат email';
@@ -644,243 +729,297 @@ export default function App() {
 
   if (!isAuthReady) {
     return (
-      <div className="min-h-screen bg-vk-bg flex items-center justify-center">
-        <div className="w-12 h-12 border-4 border-vk-accent border-t-transparent rounded-full animate-spin"></div>
-      </div>
+      <ErrorBoundary>
+        <div className="min-h-screen bg-vk-bg flex items-center justify-center">
+          <div className="w-12 h-12 border-4 border-vk-accent border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      </ErrorBoundary>
     );
   }
 
   if (!currentUser) {
     if (isIntroPlaying) {
       return (
-        <div className="flex flex-col items-center justify-center min-h-screen w-full bg-vk-bg px-6 font-sans relative overflow-hidden">
-          {/* Декоративные элементы фона */}
-          <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-vk-accent/5 rounded-full blur-[100px] pointer-events-none" />
-          <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-500/5 rounded-full blur-[100px] pointer-events-none" />
+        <ErrorBoundary>
+          <div className="flex flex-col items-center justify-center min-h-screen w-full bg-vk-bg px-6 font-sans relative overflow-hidden">
+            {/* Декоративные элементы фона */}
+            <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-vk-accent/5 rounded-full blur-[100px] pointer-events-none" />
+            <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-500/5 rounded-full blur-[100px] pointer-events-none" />
 
-          {/* Эксклюзивный анимированный логотип */}
-          <motion.div
-            initial={{ opacity: 0, y: -30, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ duration: 0.8, ease: "easeOut", delay: 0.1 }}
-            className="mb-8 flex flex-col items-center z-20"
-          >
-            <Logo size="md" />
-          </motion.div>
+            {/* Эксклюзивный анимированный логотип */}
+            <motion.div
+              initial={{ opacity: 0, y: -30, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.8, ease: "easeOut", delay: 0.1 }}
+              className="mb-8 flex flex-col items-center z-20"
+            >
+              <Logo size="md" />
+            </motion.div>
 
-          {/* Анимированный телефон */}
-          <motion.div
-            initial={{ y: 100, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: -100, opacity: 0 }}
-            transition={{ duration: 0.8, ease: "easeOut" }}
-            className="relative w-[280px] h-[580px] bg-white rounded-[40px] shadow-2xl border-[8px] border-gray-900 overflow-hidden flex flex-col z-10"
-          >
-            {/* Dynamic Island / Notch */}
-            <div className="absolute top-0 inset-x-0 flex justify-center z-20">
-              <div className="w-24 h-6 bg-gray-900 rounded-b-3xl"></div>
-            </div>
-
-            {/* Chat Header */}
-            <div className="bg-gray-50 pt-10 pb-4 px-4 border-b border-gray-100 flex items-center justify-center shadow-sm z-10">
-              <div className="flex flex-col items-center">
-                <Logo size="xs" showText={false} />
-                <h2 className="text-sm font-bold text-gray-800 mt-1">RDIS Social</h2>
-                <p className="text-[10px] text-green-500 font-medium">online</p>
+            {/* Анимированный телефон */}
+            <motion.div
+              initial={{ y: 100, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: -100, opacity: 0 }}
+              transition={{ duration: 0.8, ease: "easeOut" }}
+              className="relative w-[280px] h-[580px] bg-white rounded-[40px] shadow-2xl border-[8px] border-gray-900 overflow-hidden flex flex-col z-10"
+            >
+              {/* Dynamic Island / Notch */}
+              <div className="absolute top-0 inset-x-0 flex justify-center z-20">
+                <div className="w-24 h-6 bg-gray-900 rounded-b-3xl"></div>
               </div>
-            </div>
 
-            {/* Chat Messages */}
-            <div className="flex-1 bg-gray-50/50 p-4 flex flex-col gap-3 overflow-hidden">
-              <motion.div
-                initial={{ opacity: 0, x: -20, scale: 0.8 }}
-                animate={{ opacity: 1, x: 0, scale: 1 }}
-                transition={{ delay: 1.5, type: "spring" }}
-                className="self-start bg-white border border-gray-100 text-gray-800 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm shadow-sm max-w-[85%]"
-              >
-                Привет! 👋 Готов присоединиться?
-              </motion.div>
-
-              <motion.div
-                initial={{ opacity: 0, x: 20, scale: 0.8 }}
-                animate={{ opacity: 1, x: 0, scale: 1 }}
-                transition={{ delay: 3.0, type: "spring" }}
-                className="self-end bg-vk-accent text-white px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm shadow-md max-w-[85%]"
-              >
-                Да, поехали! 🚀
-              </motion.div>
-
-              <motion.div
-                initial={{ opacity: 0, x: -20, scale: 0.8 }}
-                animate={{ opacity: 1, x: 0, scale: 1 }}
-                transition={{ delay: 4.5, type: "spring" }}
-                className="self-start bg-white border border-gray-100 text-gray-800 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm shadow-sm max-w-[85%]"
-              >
-                Отлично! Загружаю...
-                <motion.span
-                  animate={{ opacity: [0, 1, 0] }}
-                  transition={{ repeat: Infinity, duration: 1.5 }}
-                >...</motion.span>
-              </motion.div>
-            </div>
-
-            {/* Chat Input area (fake) */}
-            <div className="bg-white p-4 border-t border-gray-100 flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-400">
-                <Plus size={16} />
+              {/* Chat Header */}
+              <div className="bg-gray-50 pt-10 pb-4 px-4 border-b border-gray-100 flex items-center justify-center shadow-sm z-10">
+                <div className="flex flex-col items-center">
+                  <Logo size="xs" showText={false} />
+                  <h2 className="text-sm font-bold text-gray-800 mt-1">RDIS Social</h2>
+                  <p className="text-[10px] text-green-500 font-medium">online</p>
+                </div>
               </div>
-              <div className="flex-1 h-8 bg-gray-100 rounded-full"></div>
-            </div>
-          </motion.div>
 
-          {/* Loading Text below phone */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.5, duration: 0.5 }}
-            className="mt-8 flex flex-col items-center z-10"
-          >
-            <div className="flex items-center gap-2 mt-2 text-vk-text-muted text-sm">
-              <div className="w-4 h-4 border-2 border-vk-accent border-t-transparent rounded-full animate-spin"></div>
-              Подключение...
-            </div>
-          </motion.div>
-        </div>
+              {/* Chat Messages */}
+              <div className="flex-1 bg-gray-50/50 p-4 flex flex-col gap-3 overflow-hidden">
+                <motion.div
+                  initial={{ opacity: 0, x: -20, scale: 0.8 }}
+                  animate={{ opacity: 1, x: 0, scale: 1 }}
+                  transition={{ delay: 1.5, type: "spring" }}
+                  className="self-start bg-white border border-gray-100 text-gray-800 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm shadow-sm max-w-[85%]"
+                >
+                  Привет! 👋 Готов присоединиться?
+                </motion.div>
+
+                <motion.div
+                  initial={{ opacity: 0, x: 20, scale: 0.8 }}
+                  animate={{ opacity: 1, x: 0, scale: 1 }}
+                  transition={{ delay: 3.0, type: "spring" }}
+                  className="self-end bg-vk-accent text-white px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm shadow-md max-w-[85%]"
+                >
+                  Да, поехали! 🚀
+                </motion.div>
+
+                <motion.div
+                  initial={{ opacity: 0, x: -20, scale: 0.8 }}
+                  animate={{ opacity: 1, x: 0, scale: 1 }}
+                  transition={{ delay: 4.5, type: "spring" }}
+                  className="self-start bg-white border border-gray-100 text-gray-800 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm shadow-sm max-w-[85%]"
+                >
+                  Отлично! Загружаю...
+                  <motion.span
+                    animate={{ opacity: [0, 1, 0] }}
+                    transition={{ repeat: Infinity, duration: 1.5 }}
+                  >...</motion.span>
+                </motion.div>
+              </div>
+
+              {/* Chat Input area (fake) */}
+              <div className="bg-white p-4 border-t border-gray-100 flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-400">
+                  <Plus size={16} />
+                </div>
+                <div className="flex-1 h-8 bg-gray-100 rounded-full"></div>
+              </div>
+            </motion.div>
+
+            {/* Loading Text below phone */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.5, duration: 0.5 }}
+              className="mt-8 flex flex-col items-center z-10"
+            >
+              <div className="flex items-center gap-2 mt-2 text-vk-text-muted text-sm">
+                <div className="w-4 h-4 border-2 border-vk-accent border-t-transparent rounded-full animate-spin"></div>
+                Подключение...
+              </div>
+            </motion.div>
+
+            <motion.button
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 2 }}
+              onClick={() => setIsIntroPlaying(false)}
+              className="mt-4 text-vk-text-muted text-xs hover:text-vk-accent transition-colors z-20"
+            >
+              Пропустить интро
+            </motion.button>
+          </div>
+        </ErrorBoundary>
       );
     }
 
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen w-full bg-vk-bg px-6 font-sans relative overflow-hidden">
-        <Toaster position="top-center" richColors />
-        
-        {/* Декоративные элементы фона */}
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-vk-accent/5 rounded-full blur-[100px] pointer-events-none" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-500/5 rounded-full blur-[100px] pointer-events-none" />
+      <ErrorBoundary>
+        <div className="flex flex-col items-center justify-center min-h-screen w-full bg-vk-bg px-6 font-sans relative overflow-hidden">
+          <Toaster position="top-center" richColors />
+          
+          {/* Декоративные элементы фона */}
+          <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-vk-accent/5 rounded-full blur-[100px] pointer-events-none" />
+          <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-500/5 rounded-full blur-[100px] pointer-events-none" />
 
-        {/* Анимированный логотип */}
-        <motion.div
-          initial={{ scale: 0, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: "spring", damping: 15, stiffness: 200 }}
-          className="mb-8 z-10"
-        >
-          <Logo size="md" />
-          <p className="text-vk-text-muted text-sm text-center mt-2">
-            {isLoginMode ? 'Войдите, чтобы продолжить' : 'Создайте аккаунт, чтобы продолжить'}
-          </p>
-        </motion.div>
+          {/* Анимированный логотип */}
+          <motion.div
+            initial={{ scale: 0, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: "spring", damping: 15, stiffness: 200 }}
+            className="mb-6 z-10"
+          >
+            <Logo size="md" />
+          </motion.div>
 
-        {/* Форма */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.3, duration: 0.4 }}
-          className="w-full max-w-sm bg-vk-panel p-6 rounded-[32px] border border-vk-border/30 shadow-2xl shadow-black/5 z-10"
-        >
-          <form onSubmit={handleEmailAuth} className="flex flex-col gap-4">
-            {!isLoginMode && (
-              <input
-                type="text"
-                placeholder="Имя пользователя"
-                value={authName}
-                onChange={(e) => setAuthName(e.target.value)}
-                className="w-full bg-vk-bg border border-vk-border rounded-2xl px-4 py-3 text-vk-text placeholder-vk-text-muted focus:outline-none focus:border-vk-accent transition-colors"
-                required
-              />
-            )}
-            <input
-              type="email"
-              placeholder="Email"
-              value={authEmail}
-              onChange={(e) => setAuthEmail(e.target.value)}
-              className="w-full bg-vk-bg border border-vk-border rounded-2xl px-4 py-3 text-vk-text placeholder-vk-text-muted focus:outline-none focus:border-vk-accent transition-colors"
-              required
-            />
-            <input
-              type="password"
-              placeholder="Пароль"
-              value={authPassword}
-              onChange={(e) => setAuthPassword(e.target.value)}
-              className="w-full bg-vk-bg border border-vk-border rounded-2xl px-4 py-3 text-vk-text placeholder-vk-text-muted focus:outline-none focus:border-vk-accent transition-colors"
-              required
-            />
-            <button
-              type="submit"
-              disabled={authLoading}
-              className="w-full bg-vk-accent text-white font-bold rounded-2xl px-4 py-4 shadow-sm hover:bg-vk-accent/90 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {authLoading ? (
-                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              ) : (
-                isLoginMode ? 'Войти' : 'Зарегистрироваться'
-              )}
-            </button>
-            
-            <div className="flex items-center gap-4 my-2">
-              <div className="flex-1 h-px bg-vk-border"></div>
-              <span className="text-xs text-vk-text-muted font-medium uppercase tracking-wider">или</span>
-              <div className="flex-1 h-px bg-vk-border"></div>
+          {/* Форма */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.3, duration: 0.4 }}
+            className="w-full max-w-sm bg-vk-panel p-6 rounded-[32px] border border-vk-border/30 shadow-2xl shadow-black/5 z-10"
+          >
+            <div className="flex bg-vk-bg p-1 rounded-2xl mb-6 border border-vk-border">
+              <button 
+                onClick={() => setIsLoginMode(true)}
+                className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all ${isLoginMode ? 'bg-vk-accent text-white shadow-sm' : 'text-vk-text-muted hover:text-vk-text'}`}
+              >
+                Вход
+              </button>
+              <button 
+                onClick={() => setIsLoginMode(false)}
+                className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all ${!isLoginMode ? 'bg-vk-accent text-white shadow-sm' : 'text-vk-text-muted hover:text-vk-text'}`}
+              >
+                Регистрация
+              </button>
             </div>
 
-            <button 
-              type="button"
-              onClick={async () => {
-                try {
-                  await signInWithPopup(auth, googleProvider);
-                  toast.success('Успешный вход!');
-                } catch (error: any) {
-                  if (error.code !== 'auth/popup-closed-by-user') {
+            <form onSubmit={handleEmailAuth} className="flex flex-col gap-4">
+              {!isLoginMode && (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-vk-text-muted ml-3 uppercase tracking-wider">Имя пользователя</label>
+                  <input
+                    type="text"
+                    placeholder="Как вас называть?"
+                    value={authName}
+                    onChange={(e) => setAuthName(e.target.value)}
+                    className="w-full bg-vk-bg border border-vk-border rounded-2xl px-4 py-3 text-vk-text placeholder-vk-text-muted focus:outline-none focus:border-vk-accent transition-colors"
+                    required
+                  />
+                </div>
+              )}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-vk-text-muted ml-3 uppercase tracking-wider">Email</label>
+                <input
+                  type="email"
+                  placeholder="example@mail.com"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  className="w-full bg-vk-bg border border-vk-border rounded-2xl px-4 py-3 text-vk-text placeholder-vk-text-muted focus:outline-none focus:border-vk-accent transition-colors"
+                  required
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-vk-text-muted ml-3 uppercase tracking-wider">Пароль</label>
+                <input
+                  type="password"
+                  placeholder="Минимум 6 символов"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  className="w-full bg-vk-bg border border-vk-border rounded-2xl px-4 py-3 text-vk-text placeholder-vk-text-muted focus:outline-none focus:border-vk-accent transition-colors"
+                  required
+                />
+              </div>
+              {!isLoginMode && (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-vk-text-muted ml-3 uppercase tracking-wider">Подтверждение</label>
+                  <input
+                    type="password"
+                    placeholder="Повторите пароль"
+                    value={authConfirmPassword}
+                    onChange={(e) => setAuthConfirmPassword(e.target.value)}
+                    className="w-full bg-vk-bg border border-vk-border rounded-2xl px-4 py-3 text-vk-text placeholder-vk-text-muted focus:outline-none focus:border-vk-accent transition-colors"
+                    required
+                  />
+                </div>
+              )}
+              
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={authLoading}
+                  className="w-full bg-vk-accent text-white font-bold rounded-2xl px-4 py-4 shadow-sm hover:bg-vk-accent/90 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {authLoading ? (
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  ) : (
+                    isLoginMode ? 'Войти' : 'Создать аккаунт'
+                  )}
+                </button>
+              </div>
+
+              <div className="flex items-center gap-4 my-2">
+                <div className="flex-1 h-px bg-vk-border"></div>
+                <span className="text-xs text-vk-text-muted font-medium uppercase tracking-wider">или</span>
+                <div className="flex-1 h-px bg-vk-border"></div>
+              </div>
+
+              <button 
+                type="button"
+                onClick={async () => {
+                  try {
+                    await signInWithPopup(auth, googleProvider);
+                    toast.success('Успешный вход!');
+                  } catch (error: any) {
+                    if (error.code !== 'auth/popup-closed-by-user') {
+                      toast.error('Ошибка входа: ' + error.message);
+                    }
+                  }
+                }}
+                className="w-full bg-white text-gray-800 border border-gray-200 font-bold rounded-2xl px-4 py-4 shadow-sm hover:bg-gray-50 active:scale-[0.98] transition-all flex items-center justify-center gap-3"
+              >
+                <svg viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg"><g transform="matrix(1, 0, 0, 1, 27.009001, -39.238998)"><path fill="#4285F4" d="M -3.264 51.509 C -3.264 50.719 -3.334 49.969 -3.454 49.239 L -14.754 49.239 L -14.754 53.749 L -8.284 53.749 C -8.574 55.229 -9.424 56.479 -10.684 57.329 L -10.684 60.329 L -6.824 60.329 C -4.564 58.239 -3.264 55.159 -3.264 51.509 Z"/><path fill="#34A853" d="M -14.754 63.239 C -11.514 63.239 -8.804 62.159 -6.824 60.329 L -10.684 57.329 C -11.764 58.049 -13.134 58.489 -14.754 58.489 C -17.884 58.489 -20.534 56.379 -21.484 53.529 L -25.464 53.529 L -25.464 56.619 C -23.494 60.539 -19.444 63.239 -14.754 63.239 Z"/><path fill="#FBBC05" d="M -21.484 53.529 C -21.734 52.809 -21.864 52.039 -21.864 51.239 C -21.864 50.439 -21.724 49.669 -21.484 48.949 L -21.484 45.859 L -21.484 45.859 C -26.284 47.479 -26.754 49.299 -26.754 51.239 C -26.754 53.179 -26.284 54.999 -25.464 56.619 L -21.484 53.529 Z"/><path fill="#EA4335" d="M -14.754 43.989 C -12.984 43.989 -11.404 44.599 -10.154 45.789 L -6.734 42.369 C -8.804 40.429 -11.514 39.239 -14.754 39.239 C -19.444 39.239 -23.494 41.939 -25.464 45.859 L -21.484 48.949 C -20.534 46.099 -17.884 43.989 -14.754 43.989 Z"/></g></svg>
+                Войти через Google
+              </button>
+
+              <button 
+                type="button"
+                onClick={async () => {
+                  try {
+                    await signInAnonymously(auth);
+                    toast.success('Успешный анонимный вход!');
+                  } catch (error: any) {
                     toast.error('Ошибка входа: ' + error.message);
                   }
-                }
-              }}
-              className="w-full bg-white text-gray-800 border border-gray-200 font-bold rounded-2xl px-4 py-4 shadow-sm hover:bg-gray-50 active:scale-[0.98] transition-all flex items-center justify-center gap-3"
-            >
-              <svg viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg"><g transform="matrix(1, 0, 0, 1, 27.009001, -39.238998)"><path fill="#4285F4" d="M -3.264 51.509 C -3.264 50.719 -3.334 49.969 -3.454 49.239 L -14.754 49.239 L -14.754 53.749 L -8.284 53.749 C -8.574 55.229 -9.424 56.479 -10.684 57.329 L -10.684 60.329 L -6.824 60.329 C -4.564 58.239 -3.264 55.159 -3.264 51.509 Z"/><path fill="#34A853" d="M -14.754 63.239 C -11.514 63.239 -8.804 62.159 -6.824 60.329 L -10.684 57.329 C -11.764 58.049 -13.134 58.489 -14.754 58.489 C -17.884 58.489 -20.534 56.379 -21.484 53.529 L -25.464 53.529 L -25.464 56.619 C -23.494 60.539 -19.444 63.239 -14.754 63.239 Z"/><path fill="#FBBC05" d="M -21.484 53.529 C -21.734 52.809 -21.864 52.039 -21.864 51.239 C -21.864 50.439 -21.724 49.669 -21.484 48.949 L -21.484 45.859 L -25.464 45.859 C -26.284 47.479 -26.754 49.299 -26.754 51.239 C -26.754 53.179 -26.284 54.999 -25.464 56.619 L -21.484 53.529 Z"/><path fill="#EA4335" d="M -14.754 43.989 C -12.984 43.989 -11.404 44.599 -10.154 45.789 L -6.734 42.369 C -8.804 40.429 -11.514 39.239 -14.754 39.239 C -19.444 39.239 -23.494 41.939 -25.464 45.859 L -21.484 48.949 C -20.534 46.099 -17.884 43.989 -14.754 43.989 Z"/></g></svg>
-              Войти через Google
-            </button>
+                }}
+                className="w-full bg-vk-panel text-vk-text border border-vk-border font-bold rounded-2xl px-4 py-4 shadow-sm hover:bg-vk-bg active:scale-[0.98] transition-all flex items-center justify-center gap-3"
+              >
+                <User size={24} className="text-vk-text-muted" />
+                Войти без регистрации
+              </button>
 
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  await signInAnonymously(auth);
-                  toast.success('Успешный анонимный вход!');
-                } catch (error: any) {
-                  toast.error('Ошибка входа: ' + error.message);
-                }
-              }}
-              className="w-full bg-vk-panel text-vk-text border border-vk-border font-bold rounded-2xl px-4 py-4 shadow-sm hover:bg-vk-bg active:scale-[0.98] transition-all flex items-center justify-center gap-3"
-            >
-              <User size={24} className="text-vk-text-muted" />
-              Войти без регистрации
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setIsLoginMode(!isLoginMode)}
-              className="text-sm text-vk-text-muted hover:text-vk-accent transition-colors mt-2"
-            >
-              {isLoginMode ? 'Нет аккаунта? Зарегистрироваться' : 'Уже есть аккаунт? Войти'}
-            </button>
-          </form>
-        </motion.div>
-      </div>
+              <button
+                type="button"
+                onClick={() => setIsLoginMode(!isLoginMode)}
+                className="w-full text-center text-sm text-vk-text-muted hover:text-vk-accent transition-colors mt-2"
+              >
+                {isLoginMode ? 'Нет аккаунта? Зарегистрироваться' : 'Уже есть аккаунт? Войти'}
+              </button>
+            </form>
+          </motion.div>
+        </div>
+      </ErrorBoundary>
     );
   }
 
   return (
-    <div className="flex flex-col h-screen w-full bg-vk-bg text-vk-text font-sans relative">
-      <Toaster position="top-center" richColors />
-      {/* Контентная область */}
-      <div className={`flex-1 flex flex-col overflow-hidden relative transition-opacity duration-300 ${activeChat || activeCommunity || selectedPost || isCreatingCommunity || isAdminPanelOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
-        {viewingProfile ? (
-          <div className="flex-1 flex flex-col w-full h-full overflow-y-auto bg-vk-bg pb-20 no-scrollbar">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.98 }} 
-              animate={{ opacity: 1, scale: 1 }} 
-              className="flex flex-col w-full"
-            >
+    <ErrorBoundary>
+      <div className="flex flex-col h-screen w-full bg-vk-bg text-vk-text font-sans relative">
+        <Toaster position="top-center" richColors />
+        {/* Контентная область */}
+        <div className={`flex-1 flex flex-col overflow-hidden relative transition-opacity duration-300 ${activeChat || activeCommunity || selectedPost || isCreatingCommunity || isAdminPanelOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+          {viewingProfile ? (
+            <div className="flex-1 flex flex-col w-full h-full overflow-y-auto bg-vk-bg pb-20 no-scrollbar">
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.98 }} 
+                animate={{ opacity: 1, scale: 1 }} 
+                className="flex flex-col w-full"
+              >
               {/* Обложка и шапка */}
               <div className="relative h-56 sm:h-72 w-full overflow-hidden">
                 <motion.img 
@@ -2882,6 +3021,7 @@ export default function App() {
         )}
       </AnimatePresence>
     </div>
-  );
+  </ErrorBoundary>
+);
 }
 
