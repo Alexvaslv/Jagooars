@@ -5,95 +5,34 @@
       "description": "User profile information",
       "type": "object",
       "properties": {
-        "uid": { "type": "string" },
-        "username": { "type": "string" },
-        "displayName": { "type": "string" },
-        "email": { "type": "string", "format": "email" },
-        "photoURL": { "type": "string", "format": "uri" },
-        "isVerified": { "type": "boolean" },
-        "isAdmin": { "type": "boolean" },
-        "isCreator": { "type": "boolean" },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "uid": { "type": "string", "description": "User ID" },
+        "displayName": { "type": "string", "description": "User display name" },
+        "email": { "type": "string", "description": "User email" },
+        "clanName": { "type": "string", "description": "Name of the clan the user belongs to" },
+        "clanRole": { "type": "string", "description": "Role in the clan" }
       },
-      "required": ["uid", "username", "displayName", "email"]
+      "required": ["uid", "displayName", "email"]
     },
-    "HubProfile": {
-      "title": "HubProfile",
-      "description": "Detailed profile for the Hub",
+    "Clan": {
+      "title": "Clan",
+      "description": "Clan information",
       "type": "object",
       "properties": {
-        "hubName": { "type": "string" },
-        "specialization": { "type": "string" },
-        "about": { "type": "string" },
-        "interests": { "type": "array", "items": { "type": "string" } },
-        "photoURL": { "type": "string", "format": "uri" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "name": { "type": "string", "description": "Clan name" },
+        "members": { "type": "number", "description": "Number of members" },
+        "description": { "type": "string", "description": "Clan description" }
       },
-      "required": ["hubName", "specialization"]
-    },
-    "Post": {
-      "title": "Post",
-      "description": "User publication",
-      "type": "object",
-      "properties": {
-        "authorId": { "type": "string" },
-        "authorName": { "type": "string" },
-        "authorPhoto": { "type": "string", "format": "uri" },
-        "authorIsVerified": { "type": "boolean" },
-        "text": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "likes": { "type": "integer" },
-        "comments": { "type": "integer" },
-        "shares": { "type": "integer" },
-        "views": { "type": "integer" }
-      },
-      "required": ["authorId", "text", "createdAt"]
-    },
-    "Community": {
-      "title": "Community",
-      "description": "Group or community",
-      "type": "object",
-      "properties": {
-        "name": { "type": "string" },
-        "description": { "type": "string" },
-        "avatar": { "type": "string", "format": "uri" },
-        "cover": { "type": "string", "format": "uri" },
-        "creatorId": { "type": "string" },
-        "membersCount": { "type": "integer" },
-        "isVerified": { "type": "boolean" },
-        "createdAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["name", "creatorId", "createdAt"]
+      "required": ["name", "members"]
     }
   },
   "firestore": {
-    "/users/{userId}": {
-      "schema": "User",
-      "description": "User documents"
+    "/users/{uid}": {
+      "schema": { "$ref": "User" },
+      "description": "User profiles"
     },
-    "/hub_profiles/{userId}": {
-      "schema": "HubProfile",
-      "description": "Hub profile documents"
-    },
-    "/posts/{postId}": {
-      "schema": "Post",
-      "description": "Post documents"
-    },
-    "/communities/{communityId}": {
-      "schema": "Community",
-      "description": "Community documents"
-    },
-    "/communities/{communityId}/members/{userId}": {
-      "schema": "object",
-      "description": "Members of the community"
-    },
-    "/communities/{communityId}/posts/{postId}": {
-      "schema": "Post",
-      "description": "Posts in the community"
-    },
-    "/memberships/{membershipId}": {
-      "schema": "object",
-      "description": "User memberships in communities"
+    "/clans/{name}": {
+      "schema": { "$ref": "Clan" },
+      "description": "Clan data"
     }
   }
 }

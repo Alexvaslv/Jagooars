@@ -1,221 +1,24 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: users
-    // Document ID: {userId}
-    // Fields:
-    //   - uid: string (required)
-    //   - username: string (required)
-    //   - displayName: string (required)
-    //   - email: string (required, email format)
-    //   - photoURL: string (optional, uri format)
-    //   - isVerified: boolean (optional)
-    //   - isAdmin: boolean (optional)
-    //   - isCreator: boolean (optional)
-    //   - createdAt: timestamp (optional)
-    //
-    // Collection: hub_profiles
-    // Document ID: {userId}
-    // Fields:
-    //   - hubName: string (required)
-    //   - specialization: string (required)
-    //   - about: string (optional)
-    //   - interests: list (optional)
-    //   - photoURL: string (optional, uri format)
-    //   - updatedAt: timestamp (optional)
-    //
-    // Collection: posts
-    // Document ID: {postId}
-    // Fields:
-    //   - authorId: string (required)
-    //   - authorName: string (optional)
-    //   - authorPhoto: string (optional, uri format)
-    //   - authorIsVerified: boolean (optional)
-    //   - text: string (required)
-    //   - createdAt: timestamp (required)
-    //   - likes: number (optional)
-    //   - comments: number (optional)
-    //   - shares: number (optional)
-    //   - views: number (optional)
-    //
-    // Collection: communities
-    // Document ID: {communityId}
-    // Fields:
-    //   - name: string (required)
-    //   - description: string (optional)
-    //   - avatar: string (optional, uri format)
-    //   - cover: string (optional, uri format)
-    //   - creatorId: string (required)
-    //   - membersCount: number (optional)
-    //   - isVerified: boolean (optional)
-    //   - createdAt: timestamp (required)
-    //
-    // Subcollection: communities/{communityId}/members
-    // Document ID: {userId}
-    //
-    // Subcollection: communities/{communityId}/posts
-    // Document ID: {postId}
-    // Fields: same as posts collection
-    //
-    // ===============================================================
-
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
     
+    // Helper functions
     function isAuthenticated() {
       return request.auth != null;
     }
-
+    
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    function isAdmin() {
-      return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          (request.auth.token.email == "alexeivasilev270819942@gmail.com" && request.auth.token.email_verified == true));
-    }
-
-    function hasRequiredFields(fields) {
-      return request.resource.data.keys().hasAll(fields);
-    }
-
-    function hasOnlyAllowedFields(fields) {
-      return request.resource.data.keys().hasOnly(fields);
-    }
-
-    function isValidEmail(email) {
-      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
-    }
-
-    function isValidUrl(url) {
-      return url is string && (url.matches("^https://.*") || url.matches("^http://.*") || url.matches("^data:.*"));
-    }
-
-    function isValidDateString(dateStr) {
-      return dateStr is string &&
-        dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
-    }
-
-    // ===============================================================
-    // Domain Validators
-    // ===============================================================
-
-    function isValidUser(data) {
-      return hasRequiredFields(['uid', 'username', 'displayName', 'email']) &&
-             data.uid is string &&
-             data.username is string && data.username.size() > 0 && data.username.size() < 50 &&
-             data.displayName is string && data.displayName.size() > 0 && data.displayName.size() < 100 &&
-             isValidEmail(data.email) &&
-             (!('photoURL' in data) || isValidUrl(data.photoURL)) &&
-             (!('cover' in data) || isValidUrl(data.cover)) &&
-             (!('about' in data) || (data.about is string && data.about.size() < 1000)) &&
-             (!('specialization' in data) || (data.specialization is string && data.specialization.size() < 100)) &&
-             (!('interests' in data) || data.interests is list) &&
-             (!('isVerified' in data) || data.isVerified is bool) &&
-             (!('isAdmin' in data) || data.isAdmin is bool) &&
-             (!('isCreator' in data) || data.isCreator is bool);
-    }
-
-    function isValidHubProfile(data) {
-      return hasRequiredFields(['hubName', 'specialization']) &&
-             data.hubName is string && data.hubName.size() > 0 && data.hubName.size() < 100 &&
-             data.specialization is string && data.specialization.size() > 0 && data.specialization.size() < 100 &&
-             (!('about' in data) || (data.about is string && data.about.size() < 1000)) &&
-             (!('interests' in data) || data.interests is list) &&
-             (!('photoURL' in data) || isValidUrl(data.photoURL));
-    }
-
-    function isValidPost(data) {
-      return hasRequiredFields(['authorId', 'text', 'createdAt']) &&
-             data.authorId is string &&
-             data.text is string && data.text.size() > 0 && data.text.size() < 10000 &&
-             (!('authorName' in data) || (data.authorName is string && data.authorName.size() < 100)) &&
-             (!('authorPhoto' in data) || isValidUrl(data.authorPhoto)) &&
-             (!('authorIsVerified' in data) || data.authorIsVerified is bool) &&
-             (!('image' in data) || (data.image is string && data.image.size() < 10000000)) &&
-             (!('targetUserId' in data) || data.targetUserId is string) &&
-             (!('likes' in data) || data.likes is number) &&
-             (!('comments' in data) || data.comments is number) &&
-             (!('shares' in data) || data.shares is number) &&
-             (!('views' in data) || data.views is number);
-    }
-
-    function isValidCommunity(data) {
-      return hasRequiredFields(['name', 'creatorId', 'createdAt']) &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             (!('username' in data) || (data.username is string && data.username.size() < 50)) &&
-             data.creatorId is string &&
-             (!('description' in data) || (data.description is string && data.description.size() < 1000)) &&
-             (!('avatar' in data) || isValidUrl(data.avatar)) &&
-             (!('cover' in data) || isValidUrl(data.cover)) &&
-             (!('membersCount' in data) || data.membersCount is number) &&
-             (!('isVerified' in data) || data.isVerified is bool);
-    }
-
-    // ===============================================================
-    // Rules
-    // ===============================================================
-
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
-                      (request.resource.data.isAdmin == false || request.auth.token.email == "alexeivasilev270819942@gmail.com") && 
-                      (request.resource.data.isVerified == false || request.auth.token.email == "alexeivasilev270819942@gmail.com");
-      allow update: if (isOwner(userId) && isValidUser(request.resource.data) && 
-                       (request.resource.data.isAdmin == resource.data.isAdmin || request.auth.token.email == "alexeivasilev270819942@gmail.com") &&
-                       (request.resource.data.isVerified == resource.data.isVerified || request.auth.token.email == "alexeivasilev270819942@gmail.com")) || 
-                      isAdmin();
-      allow delete: if isAdmin();
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId) && request.resource.data.keys().hasOnly(['uid', 'displayName', 'email', 'clanName', 'clanRole']);
     }
-
-    match /hub_profiles/{userId} {
+    
+    match /clans/{clanName} {
       allow read: if isAuthenticated();
-      allow create: if isOwner(userId) && isValidHubProfile(request.resource.data);
-      allow update: if isOwner(userId) && isValidHubProfile(request.resource.data);
-      allow delete: if isOwner(userId) || isAdmin();
-    }
-
-    match /posts/{postId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.authorId && isValidPost(request.resource.data);
-      allow update: if (isAuthenticated() && request.auth.uid == resource.data.authorId && isValidPost(request.resource.data)) || isAdmin();
-      allow delete: if (isAuthenticated() && request.auth.uid == resource.data.authorId) || isAdmin();
-    }
-
-    match /communities/{communityId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.creatorId && isValidCommunity(request.resource.data);
-      allow update: if (isAuthenticated() && request.auth.uid == resource.data.creatorId && isValidCommunity(request.resource.data)) || isAdmin();
-      allow delete: if (isAuthenticated() && request.auth.uid == resource.data.creatorId) || isAdmin();
-
-      match /members/{userId} {
-        allow read: if isAuthenticated();
-        allow create, delete: if isOwner(userId);
-      }
-
-      match /posts/{postId} {
-        allow read: if isAuthenticated();
-        allow create: if isAuthenticated() && request.auth.uid == request.resource.data.authorId && isValidPost(request.resource.data);
-        allow update: if (isAuthenticated() && request.auth.uid == resource.data.authorId && isValidPost(request.resource.data)) || isAdmin();
-        allow delete: if (isAuthenticated() && request.auth.uid == resource.data.authorId) || isAdmin();
-      }
-    }
-
-    match /memberships/{membershipId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId;
-      allow delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
-    }
-
-    // Default deny
-    match /{path=**} {
-      allow read, write: if false;
+      allow write: if isAuthenticated();
     }
   }
 }
